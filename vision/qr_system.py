@@ -3,9 +3,9 @@ import time
 import cv2
 import numpy as np
 
-from pixtopix import PixelToMeters
-from pyzbr import RobustQRScanner
-from qrpipe import preprocess_for_qr
+from vision.pixel_to_meters import PixelToMeters
+from vision.qr_scanner import RobustQRScanner
+from vision.preprocessing import preprocess_for_qr
 
 
 class QRSystem:

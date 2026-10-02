@@ -1,7 +1,7 @@
 from pyzbar.pyzbar import decode as pyzbar_decode
 import cv2
 
-from qrpipe import preprocess_for_qr
+from vision.preprocessing import preprocess_for_qr
 
 
 class RobustQRScanner:
