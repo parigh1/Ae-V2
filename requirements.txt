@@ -1,0 +1,16 @@
+# Core (laptop + Pi)
+dronekit==2.9.2
+pymavlink==2.4.41
+future            # dronekit imports `past` from this; not pulled in automatically
+opencv-python==4.9.0.80
+pyzbar==0.1.9
+numpy==1.26.4
+pyserial==3.5
+
+# Dev / tests
+pytest
+qrcode[pil]       # generates QR images for tests/test_qr_pipeline.py
+
+# Raspberry Pi only (install on the Pi, not the laptop)
+# RPi.GPIO
+# picamera2

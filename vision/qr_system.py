@@ -1,151 +1,113 @@
+# =============================================================================
+# vision/qr_system.py — Team Vajra AeroTHON 2026
+#
+# Mission-level QR logic. DETECTION ONLY — it never moves the drone.
+# Centering over the target is navigation/visual_servo.py.
+#
+# CHANGES vs previous version
+#   [FIX] missing `pyzbar_decode` import (crashed on first target scan).
+#   [FIX] no raw DroneKit access (vehicle.rangefinder / vehicle.location);
+#         uses the Vehicle wrapper (rangefinder_distance, altitude).
+#   [FIX] removed self.nav._send_ned_velocity (did not exist).
+#   [MOVED] center_over_target() -> navigation/visual_servo.py (gains come
+#           from params, body-frame commands, sign handled in PixelToMeters).
+#   [NEW] scan_start_qr() requires QR_CONFIRM_COUNT matching reads in a row.
+#   [NEW] find_target() returns a TargetFix: offset in the BODY frame
+#         (forward_m, right_m) — directly usable by VisualServo.
+#   `camera` must provide capture_array() -> RGB uint8 frame, and may provide
+#   `.pitch_deg` (see hardware/camera.py: rig.view("down")).
+#   [NEW] tilted-camera support (pitch_deg) via PixelToMeters.
+# =============================================================================
+
 import time
+from dataclasses import dataclass
+from typing import Optional
 
-import cv2
-import numpy as np
-
+from config.params import QR_SCAN_TIMEOUT_A, QR_CONFIRM_COUNT, CAM_FPS
 from vision.pixel_to_meters import PixelToMeters
-from vision.qr_scanner import RobustQRScanner
-from vision.preprocessing import preprocess_for_qr
+from vision.qr_scanner import RobustQRScanner, QRConfirmer
+
+
+@dataclass
+class TargetFix:
+    """Where the matching QR is, relative to the drone (body frame)."""
+    forward_m: float      # + = target is ahead of the drone
+    right_m: float        # + = target is to the right
+    dx_px: float          # pixel offset from image centre (+ right)
+    dy_px: float          # pixel offset from image centre (+ down)
+    altitude_m: float     # height used for the pixel→metre scale
+    method: str
 
 
 class QRSystem:
-    def __init__(self, camera, vehicle, nav_module):
+    def __init__(self, camera, vehicle, sleep=time.sleep, clock=time.monotonic):
         self.camera = camera
         self.vehicle = vehicle
-        self.nav = nav_module
+        # How the camera is tilted (90 = straight down). A CameraView from
+        # hardware/camera.py provides this; a bare test camera defaults to 90.
+        self.pitch_deg = getattr(camera, "pitch_deg", 90.0)
         self.scanner = RobustQRScanner()
-        self.p2m = PixelToMeters()
-        self.delivery_id = None
+        self.delivery_id: Optional[str] = None
+        self._sleep = sleep
+        self._clock = clock
 
-    # ─────── Task A: scan the start QR at 5m ───────
-    def scan_start_qr(self, timeout=15.0):
-        """
-        Called from state SCAN_START_QR.
-        Drone is hovering at 5m. Tries every 100ms.
-        Returns delivery_id string, or None on timeout.
-        """
-        deadline = time.time() + timeout
-        attempt = 0
+    # ── Helpers ───────────────────────────────────────────────────────────────
+    def _height_agl(self) -> float:
+        """Height above ground for pixel scaling: rangefinder if valid, else baro."""
+        rf = self.vehicle.rangefinder_distance
+        return rf if rf is not None else self.vehicle.altitude
 
-        while time.time() < deadline:
+    # ── Task A: scan the start QR (drone hovering at ALT_START_QR) ───────────
+    def scan_start_qr(self, timeout: float = QR_SCAN_TIMEOUT_A) -> Optional[str]:
+        """
+        Returns the delivery ID once it has been read QR_CONFIRM_COUNT times
+        in a row, or None on timeout.
+        """
+        confirmer = QRConfirmer(QR_CONFIRM_COUNT)
+        deadline = self._clock() + timeout
+        period = 1.0 / CAM_FPS
+        frames = 0
+
+        while self._clock() < deadline:
             frame = self.camera.capture_array()
-            result = self.scanner.decode_frame(frame)
-            attempt += 1
+            frames += 1
+            confirmed = confirmer.update(self.scanner.decode_frame(frame))
+            if confirmed:
+                print(f"[QR] Start QR confirmed after {frames} frames: '{confirmed}'")
+                self.delivery_id = confirmed
+                return confirmed
+            if frames % 30 == 0:
+                print(f"[QR] Still scanning... {frames} frames")
+            self._sleep(period)
 
-            if result:
-                print(f"[QR] Start QR decoded on attempt {attempt}: '{result}'")
-                self.delivery_id = result
-                return result
-
-            # Every 3 seconds of failure, log the attempt count
-            # so you know during testing how long it's taking
-            if attempt % 30 == 0:
-                elapsed = timeout - (deadline - time.time())
-                print(f"[QR] Still scanning... {elapsed:.0f}s elapsed, {attempt} frames")
-
-            time.sleep(0.1)  # 10fps scan rate
-
-        print(f"[QR] FAILED after {attempt} attempts in {timeout}s")
+        print(f"[QR] FAILED: no confirmed start QR in {timeout}s ({frames} frames)")
         self.scanner.stats()
         return None
 
-    # ─────── Task B: find target QR during lawnmower search ───────
-    def scan_for_target(self):
+    # ── Task B: look for the matching QR in one frame ─────────────────────────
+    def find_target(self, frame=None) -> Optional[TargetFix]:
         """
-        Called continuously during lawnmower search pattern.
-        Returns (dx_m, dy_m, True) if matching QR found and centered.
-        Returns (0, 0, False) if no match in current frame.
-
-        dx_m, dy_m = displacement from frame center in meters.
-        Positive dx_m = QR is to the right, drone must move right.
-        Positive dy_m = QR is below center, drone must move forward.
+        Analyse one frame (grabs one if not supplied). Returns a TargetFix if a
+        QR whose payload equals delivery_id is visible, else None.
+        Cheap to call every loop: stops decoding as soon as the target is seen.
         """
         if self.delivery_id is None:
-            raise RuntimeError("scan_start_qr() must succeed before scan_for_target()")
+            raise RuntimeError("scan_start_qr() must succeed before find_target()")
 
-        frame = self.camera.capture_array()
-        variants = preprocess_for_qr(frame)
-        alt = self.vehicle.rangefinder.distance or \
-              self.vehicle.location.global_relative_frame.alt
+        if frame is None:
+            frame = self.camera.capture_array()
+        h, w = frame.shape[:2]
 
-        img_cx = PixelToMeters.IMG_W // 2
-        img_cy = PixelToMeters.IMG_H // 2
-
-        # Try pyzbar first (returns all QRs visible in frame at once)
-        for img in variants:
-            results = pyzbar_decode(img)
-            for obj in results:
-                data = obj.data.decode('utf-8').strip()
-                if data == self.delivery_id:
-                    # Found the match — compute pixel offset from center
-                    r = obj.rect
-                    qr_cx = r.left + r.width // 2
-                    qr_cy = r.top + r.height // 2
-                    dx_px = qr_cx - img_cx
-                    dy_px = qr_cy - img_cy
-                    dx_m, dy_m = self.p2m.offset_at_altitude(dx_px, dy_px, alt)
-                    print(f"[QR] Target match! Pixel offset ({dx_px},{dy_px}) "
-                          f"→ Real offset ({dx_m:.2f}m, {dy_m:.2f}m)")
-                    return dx_m, dy_m, True
-
-        # pyzbar missed — try OpenCV (returns only one QR)
-        frame_gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
-        data, points, _ = self.scanner.cv_detector.detectAndDecode(frame_gray)
-        if data and data.strip() == self.delivery_id and points is not None:
-            corners = points[0]
-            qr_cx = int(np.mean(corners[:, 0]))
-            qr_cy = int(np.mean(corners[:, 1]))
-            dx_px = qr_cx - img_cx
-            dy_px = qr_cy - img_cy
-            dx_m, dy_m = self.p2m.offset_at_altitude(dx_px, dy_px, alt)
-            return dx_m, dy_m, True
-
-        return 0.0, 0.0, False
-
-    # ─────── Visual servo: center drone over target QR ───────
-    def center_over_target(self, tolerance_m=0.25, timeout=20.0):
-        """
-        Once target QR is found during search, this centers the drone
-        directly over it before descending for the drop.
-        Uses a PD controller to prevent oscillation.
-        """
-        kp = 0.35
-        kd = 0.08
-        prev_dx, prev_dy = 0.0, 0.0
-        dt = 0.1
-        deadline = time.time() + timeout
-
-        while time.time() < deadline:
-            dx_m, dy_m, found = self.scan_for_target()
-
-            if not found:
-                # QR temporarily lost — hover and retry
-                self.nav._send_ned_velocity(0, 0, 0)
-                time.sleep(0.2)
+        for det in self.scanner.decode_all(frame, want=self.delivery_id):
+            if det.data != self.delivery_id:
                 continue
-
-            # Check if we're close enough
-            if abs(dx_m) < tolerance_m and abs(dy_m) < tolerance_m:
-                self.nav._send_ned_velocity(0, 0, 0)
-                print(f"[QR] Centered! Residual: ({dx_m:.3f}m, {dy_m:.3f}m)")
-                return True
-
-            # PD control — derivative term damps oscillation
-            d_dx = (dx_m - prev_dx) / dt
-            d_dy = (dy_m - prev_dy) / dt
-
-            # Camera +x right = drone +East = NED vy
-            # Camera +y down  = drone +South = NED -vx (check your mounting)
-            vy = kp * dx_m + kd * d_dx
-            vx = kp * dy_m + kd * d_dy
-
-            # Clamp to safe speed
-            vx = max(-0.3, min(0.3, vx))
-            vy = max(-0.3, min(0.3, vy))
-
-            self.nav._send_ned_velocity(vx, vy, 0)
-            prev_dx, prev_dy = dx_m, dy_m
-            time.sleep(dt)
-
-        print("[QR] Centering timed out")
-        return False
+            dx_px = det.cx - w / 2.0
+            dy_px = det.cy - h / 2.0
+            alt = self._height_agl()
+            ground = PixelToMeters.offset_body(dx_px, dy_px, alt, w, h,
+                                               pitch_deg=self.pitch_deg)
+            if ground is None:          # looking at/above the horizon: not on the ground
+                continue
+            fwd, right = ground
+            return TargetFix(fwd, right, dx_px, dy_px, alt, det.method)
+        return None

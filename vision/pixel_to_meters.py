@@ -1,63 +1,95 @@
-import numpy as np
+# =============================================================================
+# vision/pixel_to_meters.py — Team Vajra AeroTHON 2026
+#
+# Turns "this QR is N pixels from the image centre" into "this QR is X metres
+# ahead and Y metres to the right of the drone, on the ground".
+#
+# CHANGES vs previous version
+#   [NEW] pitch_deg: the camera may be TILTED (90 = straight down,
+#         0 = straight forward). The pixel is turned into a ray and that ray is
+#         intersected with the flat ground. At pitch 90 the result is identical
+#         to the old formula.
+#   [NEW] CAM_IMAGE_ROTATION_DEG replaces CAM_X_SIGN / CAM_Y_SIGN
+#         (handles a camera bolted on sideways or upside-down).
+#   [CHANGED] offset_body() returns None when the pixel looks at or above the
+#         horizon (that ray never hits the ground).
+#
+# Assumptions: flat ground, drone roughly level, camera mounted on the drone's
+# centre line, height above ground = rangefinder reading.
+# =============================================================================
+
+import math
+from typing import Optional, Tuple
+
+from config.params import (
+    CAM_FOV_H_DEG, CAM_FOV_V_DEG, CAM_IMG_W, CAM_IMG_H,
+    CAM_IMAGE_ROTATION_DEG,
+)
+
+_MIN_DOWN_COMPONENT = 0.05   # ray must point down at least ~3 deg below horizon
 
 
 class PixelToMeters:
-    """
-    Converts pixel offset (from frame center) to real-world meters.
+    CAMERA_FOV_H_DEG = CAM_FOV_H_DEG
+    CAMERA_FOV_V_DEG = CAM_FOV_V_DEG
+    IMG_W = CAM_IMG_W
+    IMG_H = CAM_IMG_H
 
-    Pi Camera v3 wide specs:
-      Sensor: 12MP IMX708
-      Full FOV: 102° diagonal
-      At 1280x720: horizontal ~84°, vertical ~64°
+    # ── helpers ───────────────────────────────────────────────────────────────
+    @classmethod
+    def focal_lengths(cls, img_w=None, img_h=None) -> Tuple[float, float]:
+        """Focal lengths in pixels (fx, fy) from the field of view."""
+        img_w = img_w or cls.IMG_W
+        img_h = img_h or cls.IMG_H
+        fx = (img_w / 2.0) / math.tan(math.radians(cls.CAMERA_FOV_H_DEG) / 2)
+        fy = (img_h / 2.0) / math.tan(math.radians(cls.CAMERA_FOV_V_DEG) / 2)
+        return fx, fy
 
-    Standard Pi Camera v2 specs (if using this instead):
-      Full FOV: 62.2° horizontal, 48.8° vertical
-    """
+    @staticmethod
+    def _unrotate(dx, dy, rotation_deg):
+        """Undo a camera bolted on rotated clockwise by rotation_deg, so that
+        the result behaves as if 'top of image = drone nose'."""
+        a = math.radians(rotation_deg)
+        c, s = round(math.cos(a), 12), round(math.sin(a), 12)
+        return dx * c - dy * s, dx * s + dy * c
 
-    # Change these to match your actual camera
-    CAMERA_FOV_H_DEG = 84.0  # horizontal field of view
-    CAMERA_FOV_V_DEG = 64.0  # vertical field of view
-    IMG_W = 1280
-    IMG_H = 720
+    # ── nadir-only helpers (kept for old callers / tests) ─────────────────────
+    @classmethod
+    def metres_per_pixel(cls, altitude_m, img_w=None, img_h=None):
+        fx, fy = cls.focal_lengths(img_w, img_h)
+        return altitude_m / fx, altitude_m / fy
 
     @classmethod
-    def offset_at_altitude(cls, dx_px, dy_px, altitude_m):
+    def offset_at_altitude(cls, dx_px, dy_px, altitude_m, img_w=None, img_h=None):
+        """Straight-down camera only. Image axes: +x right, +y DOWN."""
+        mx, my = cls.metres_per_pixel(altitude_m, img_w, img_h)
+        return dx_px * mx, dy_px * my
+
+    # ── the one flight code should use ────────────────────────────────────────
+    @classmethod
+    def offset_body(cls, dx_px, dy_px, altitude_m, img_w=None, img_h=None,
+                    pitch_deg: float = 90.0,
+                    rotation_deg: Optional[float] = None
+                    ) -> Optional[Tuple[float, float]]:
         """
-        dx_px: positive = QR is to the RIGHT of frame center
-        dy_px: positive = QR is BELOW frame center (image y-down)
-        altitude_m: current rangefinder reading
-
-        Returns (dx_m, dy_m) in drone body frame:
-          dx_m positive = drone needs to move EAST
-          dy_m positive = drone needs to move NORTH
-
-        Note: camera +x (right) maps to drone +East (NED vy)
-              camera +y (down)  maps to drone +North (NED vx) because
-              camera faces forward-and-down in typical mounting.
-              Adjust signs based on your actual camera mounting.
+        Where is the thing at pixel offset (dx_px right, dy_px down) from the
+        image centre, relative to the point on the ground directly under the
+        drone?   Returns (forward_m, right_m)   (+ = ahead / to the right),
+        or None if that pixel is looking at/above the horizon.
         """
-        fov_h = np.radians(cls.CAMERA_FOV_H_DEG)
-        fov_v = np.radians(cls.CAMERA_FOV_V_DEG)
+        if rotation_deg is None:
+            rotation_deg = CAM_IMAGE_ROTATION_DEG
+        dx, dy = cls._unrotate(dx_px, dy_px, rotation_deg)
 
-        # Real-world width/height visible at this altitude
-        ground_width = 2 * altitude_m * np.tan(fov_h / 2)
-        ground_height = 2 * altitude_m * np.tan(fov_v / 2)
+        fx, fy = cls.focal_lengths(img_w, img_h)
+        u, v = dx / fx, dy / fy                 # tangent of the ray angle
 
-        # Meters per pixel
-        m_per_px_x = ground_width / cls.IMG_W
-        m_per_px_y = ground_height / cls.IMG_H
+        th = math.radians(pitch_deg)
+        ray_forward = math.cos(th) - math.sin(th) * v
+        ray_right = u
+        ray_down = math.sin(th) + math.cos(th) * v
+        if ray_down < _MIN_DOWN_COMPONENT:
+            return None
 
-        dx_m = dx_px * m_per_px_x
-        dy_m = dy_px * m_per_px_y
-
-        return dx_m, dy_m
-
-# At 5m altitude with Pi Camera v3 wide:
-# ground_width  = 2 * 5 * tan(42°) = 9.00 m visible
-# m_per_px_x    = 9.00 / 1280     = 0.0070 m/px
-# So a 100px offset → 0.70m real displacement
-
-# At 10m altitude:
-# ground_width  = 2 * 10 * tan(42°) = 18.00 m visible
-# m_per_px_x    = 18.00 / 1280      = 0.0141 m/px
-# So a 100px offset → 1.41m real displacement
+        t = altitude_m / ray_down               # distance along ray to the ground
+        return t * ray_forward, t * ray_right
