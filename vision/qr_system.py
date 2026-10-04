@@ -84,6 +84,15 @@ class QRSystem:
         self.scanner.stats()
         return None
 
+    def scan_step(self, confirmer: QRConfirmer) -> Optional[str]:
+        """ONE frame of the start-QR scan (the state machine calls this every tick).
+        Returns the delivery ID once confirmed, else None."""
+        frame = self.camera.capture_array()
+        confirmed = confirmer.update(self.scanner.decode_frame(frame))
+        if confirmed:
+            self.delivery_id = confirmed
+        return confirmed
+
     # ── Task B: look for the matching QR in one frame ─────────────────────────
     def find_target(self, frame=None) -> Optional[TargetFix]:
         """

@@ -43,3 +43,25 @@ class SimVehicle(MockVehicle):
         fwd = dn * math.cos(psi) + de * math.sin(psi)
         right = -dn * math.sin(psi) + de * math.cos(psi)
         return fwd, right
+
+
+class FlightSim(SimVehicle):
+    """SimVehicle that also climbs/descends: follows vz commands and non-blocking takeoff."""
+
+    def __init__(self, clock, heading_deg=0.0, lag=0.3):
+        super().__init__(clock, heading_deg, lag)
+        self._takeoff_target = None
+
+    def start_takeoff(self, target_alt):
+        self._log(f"TAKEOFF → {target_alt}m (non-blocking)")
+        self._takeoff_target = target_alt
+
+    def advance(self, dt):
+        super().advance(dt)
+        if self._takeoff_target is not None:
+            self._altitude = min(self._takeoff_target, self._altitude + 1.5 * dt)
+            if self._altitude >= self._takeoff_target:
+                self._takeoff_target = None
+        else:
+            vz = self.last_body_cmd[2]                 # NED: negative = climb
+            self._altitude = max(0.0, self._altitude - vz * dt)

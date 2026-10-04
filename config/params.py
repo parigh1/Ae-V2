@@ -160,24 +160,47 @@ REQUIRED_PARAMS = {
     "FENCE_ACTION": 1,     # breach → RTL
 }
 
-# ── State machine timeouts (per state, seconds) ───────────────────────────────
-# NOTE: this list is still the old 16-state set. It will be replaced by the
-# full 22-state table when mission/states.py is written (next step).
+# ── Mission clock & failure policy ────────────────────────────────────────────
+# Rulebook: 15 minutes, counted from the moment takeoff throttle goes up.
+MISSION_TIME_LIMIT_S = 900.0
+MISSION_EMERGENCY_MARGIN_S = 60.0   # at LIMIT - MARGIN the drone gives up and does RTL
+EMERGENCY_TIMEOUT_S = 120.0         # max time spent waiting for RTL to finish
+
+# ── Payload release style ─────────────────────────────────────────────────────
+# "gripper_drop": open the gripper at ALT_PAYLOAD_DROP (what the Phase 1 report says)
+# "winch"       : lower on a line to the ground, then release (what rulebook
+#                 Figure 3 describes). Flip this one line if inspectors ask for it.
+PAYLOAD_MODE = "gripper_drop"
+
+# ── Per-state time budget (seconds) ───────────────────────────────────────────
+# What happens when a state runs out of time is in mission/states.py
+# (TIMEOUT_FALLBACK). Worst case, all of these add up to ~720 s < 900 s.
 STATE_TIMEOUTS = {
+    "INIT": 10,
+    "PREFLIGHT": 30,
+    "ARM": 20,
     "TAKEOFF": 30,
-    "CLIMB_TO_START_QR": 20,
-    "SCAN_START_QR": 20,       # includes QR_SCAN_TIMEOUT_A + margin
-    "DETECT_BANNER_FWD": 35,
+    "MOVE_TO_QR_POINT": 10,
+    "SCAN_START_QR": 20,
+    "FIND_BANNER_FWD": 35,
     "DESCEND_TO_CORRIDOR": 15,
     "CORRIDOR_FORWARD": 65,
     "CLIMB_TO_DELIVERY": 25,
-    "SEARCH_DELIVERY": 175,    # [CHANGED] SEARCH_TIMEOUT + margin (was 95)
+    "SEARCH_DELIVERY": 175,
     "CENTER_OVER_QR": 25,
     "DESCEND_TO_DROP": 20,
     "DEPLOY_PAYLOAD": 35,
     "CLIMB_AFTER_DROP": 20,
-    "DETECT_BANNER_RTN": 35,
+    "FIND_BANNER_RTN": 35,
+    "DESCEND_TO_CORRIDOR_RTN": 15,
     "CORRIDOR_RETURN": 65,
-    "DESCEND_TO_LAND": 30,
+    "RETURN_TO_HOME": 40,
     "LAND": 30,
 }
+
+# ── Phase 3 additions (state machine) ─────────────────────────────────────────
+PREFLIGHT_MIN_BATTERY_PCT = 80      # do not take off below this
+START_QR_MOVE_SPEED = 0.5           # m/s for the ~1 m hop before scanning the start QR
+CENTER_RETRY_MAX = 2                # times we go back to searching after losing the target
+HOME_RADIUS_M = 2.0                 # "back over the start point" when closer than this
+PAYLOAD_RELEASE_WAIT_S = 1.5        # time allowed for the gripper to open fully

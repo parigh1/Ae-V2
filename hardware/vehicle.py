@@ -33,7 +33,7 @@ for _name in ("Callable", "MutableMapping", "Mapping", "MutableSequence",
     if not hasattr(collections, _name):
         setattr(collections, _name, getattr(collections.abc, _name))
 
-from dronekit import connect, VehicleMode  # noqa: E402
+from dronekit import connect, VehicleMode, LocationGlobalRelative  # noqa: E402
 
 # ── SET_POSITION_TARGET_LOCAL_NED type masks ──────────────────────────────────
 # bit set = field IGNORED.  bits: 0-2 pos, 3-5 vel, 6-8 accel, 9 force,
@@ -41,6 +41,16 @@ from dronekit import connect, VehicleMode  # noqa: E402
 _MASK_VEL_ONLY = 0b110111000111      # use vx,vy,vz            (3527)
 _MASK_VEL_YAWRATE = 0b010111000111   # use vx,vy,vz + yaw_rate (1479)
 _MASK_YAWRATE_ONLY = 0b010111111111  # use yaw_rate only       (1535)
+
+
+def haversine_m(lat1, lon1, lat2, lon2) -> float:
+    """Ground distance in metres between two GPS points."""
+    r = 6371000.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dphi = p2 - p1
+    dlmb = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlmb / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
 
 
 class Vehicle:
@@ -102,6 +112,19 @@ class Vehicle:
             if time.time() > deadline:
                 raise RuntimeError(f"[Vehicle] Takeoff timed out at {alt:.2f}m")
             time.sleep(0.5)
+
+    def start_takeoff(self, target_alt: float):
+        """Non-blocking takeoff command (the state machine watches the altitude)."""
+        self._dk.simple_takeoff(target_alt)
+        print(f"[Vehicle] Takeoff command sent: {target_alt} m")
+
+    def goto(self, lat: float, lon: float, alt_rel: float):
+        """Fly to a GPS point (altitude relative to home). Non-blocking."""
+        self._dk.simple_goto(LocationGlobalRelative(lat, lon, alt_rel))
+
+    def distance_to_m(self, lat: float, lon: float) -> float:
+        loc = self.gps_location
+        return haversine_m(loc.lat, loc.lon, lat, lon)
 
     def land(self):
         self.set_mode("LAND")
@@ -309,6 +332,8 @@ class MockVehicle:
         self._battery = 100.0
         self._voltage = 16.8
         self._heading = 0.0
+        self._lat = 0.0
+        self._lon = 0.0
         self._commands = []
         self.last_body_cmd = (0.0, 0.0, 0.0)   # vx, vy, vz of last body cmd
         self.last_yaw_rate = 0.0
@@ -327,6 +352,7 @@ class MockVehicle:
         self._log(f"MODE → {mode}")
 
     def arm(self, timeout: float = 15.0):
+        self._mode = "GUIDED"
         self._armed = True
         self._log("ARMED")
 
@@ -339,12 +365,28 @@ class MockVehicle:
         self._log(f"TAKEOFF → {target_alt}m")
         self._altitude = target_alt
 
+    def start_takeoff(self, target_alt: float):
+        self._log(f"TAKEOFF → {target_alt}m (non-blocking)")
+        self._altitude = target_alt
+
+    def goto(self, lat: float, lon: float, alt_rel: float):
+        self._log(f"GOTO {lat:.6f},{lon:.6f} @ {alt_rel:.1f}m")
+        self._lat, self._lon = lat, lon
+
+    def distance_to_m(self, lat: float, lon: float) -> float:
+        return haversine_m(self._lat, self._lon, lat, lon)
+
     def land(self):
+        self._mode = "LAND"
         self._log("LAND")
         self._altitude = 0.0
+        self._armed = False          # ArduPilot disarms itself after landing
 
     def rtl(self):
+        self._mode = "RTL"
         self._log("RTL")
+        self._altitude = 0.0         # mock: instantly home and landed
+        self._armed = False
 
     # Velocity control
     def send_ned_velocity(self, vx, vy, vz, duration: float = 0.0):
@@ -416,8 +458,10 @@ class MockVehicle:
     @property
     def gps_location(self):
         class Loc:
-            lat, lon, alt = 0.0, 0.0, 0.0
-        return Loc()
+            pass
+        loc = Loc()
+        loc.lat, loc.lon, loc.alt = self._lat, self._lon, self._altitude
+        return loc
 
     @property
     def groundspeed(self) -> float:
