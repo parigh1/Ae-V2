@@ -13,7 +13,7 @@ from config.params import MISSION_TIME_LIMIT_S
 
 class MissionContext:
     def __init__(self, vehicle, rig=None, qr=None, altitude=None, servo=None,
-                 safety=None, payload=None, clock: Callable = time.monotonic,
+                 safety=None, payload=None, banner=None, clock: Callable = time.monotonic,
                  sleep: Callable = time.sleep):
         self.vehicle = vehicle
         self.rig = rig                    # hardware.camera.CameraRig
@@ -22,6 +22,7 @@ class MissionContext:
         self.servo = servo                # navigation.visual_servo.VisualServo
         self.safety = safety              # safety.watchdog.Watchdog
         self.payload = payload            # payload.release.PayloadReleaser
+        self.banner = banner              # vision.banner_detector.BannerDetector
         self.clock = clock
         self.sleep = sleep
 

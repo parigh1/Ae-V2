@@ -102,6 +102,8 @@ class StateMachine:
             if nxt is None and limit is not None and ctx.state_age() > limit:
                 nxt = State.DONE if state is State.EMERGENCY else TIMEOUT_FALLBACK.get(state, State.EMERGENCY)
                 ctx.log(f"   {state.name} timed out after {limit:.0f} s → {nxt.name}")
+                if nxt is State.EMERGENCY:               # a timeout that ends in RTL is a failure
+                    self._emergency(f"timeout in {state.name}")
 
             # 4. handler
             if nxt is None:

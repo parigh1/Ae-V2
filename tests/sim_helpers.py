@@ -65,3 +65,29 @@ class FlightSim(SimVehicle):
         else:
             vz = self.last_body_cmd[2]                 # NED: negative = climb
             self._altitude = max(0.0, self._altitude - vz * dt)
+        self._heading = (self._heading + self.last_yaw_rate * dt) % 360.0   # + = clockwise
+
+
+class BannerWorldCamera:
+    """Fake FORWARD camera: draws the green banner where it would appear given the
+    drone's heading. bearing_deg = compass direction of the banner from the drone."""
+
+    def __init__(self, veh, bearing_deg=None, width=1280, height=720, hfov_deg=84.0):
+        import math
+        self.veh, self.bearing, self.w, self.h = veh, bearing_deg, width, height
+        self.fx = (width / 2) / math.tan(math.radians(hfov_deg / 2))
+        self.half_fov = hfov_deg / 2
+
+    def capture_array(self):
+        import math
+        import numpy as np
+        frame = np.full((self.h, self.w, 3), 90, np.uint8)             # grey background
+        if self.bearing is None:
+            return frame
+        delta = (self.bearing - self.veh.heading + 180) % 360 - 180     # + = banner on the right
+        if abs(delta) < self.half_fov - 8:
+            cx = int(self.w / 2 + self.fx * math.tan(math.radians(delta)))
+            x0, x1 = max(0, cx - 150), min(self.w, cx + 150)
+            frame[250:450, x0:x1] = (30, 160, 60)                       # the banner
+            frame[300:330, x0 + 20:x1 - 20] = (240, 240, 240)           # "text" stripe
+        return frame

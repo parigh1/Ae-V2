@@ -9,7 +9,7 @@
 # Real now:  INIT .. SCAN_START_QR, altitude changes, SEARCH (hover & look),
 #            CENTER_OVER_QR, DESCEND_TO_DROP, DEPLOY_PAYLOAD, RETURN_TO_HOME,
 #            LAND, EMERGENCY.
-# STUBS (marked) wait for their own phase: banner finding, corridor flying.
+# STUBS (marked) wait for their own phase: corridor flying.
 # =============================================================================
 from typing import Dict, Optional
 
@@ -18,8 +18,11 @@ from config.params import (
     START_QR_FORWARD_M, START_QR_MOVE_SPEED,
     PREFLIGHT_MIN_BATTERY_PCT, REQUIRED_PARAMS,
     SERVO_CONFIRM_FRAMES, SERVO_LOST_FRAMES_MAX, CENTER_RETRY_MAX, HOME_RADIUS_M,
+    BANNER_ALIGN_TOL, BANNER_ALIGN_FRAMES, BANNER_SEARCH_YAW_DPS,
 )
 from mission.states import State, NEXT
+from navigation.banner_align import yaw_rate_for_offset
+from vision.banner_detector import BannerDetector
 from vision.qr_scanner import QRConfirmer
 
 
@@ -104,6 +107,35 @@ def altitude_state(state: State, target_m: float, stay_over_target: bool = False
         ctx.vehicle.send_body_velocity(vx, vy, ctx.altitude.compute())
         if ctx.altitude.reached_target():
             return NEXT[state]
+    return handler
+
+
+# ── green banner: spin until it is seen, then line the nose up with it ───────
+def banner_state(state: State):
+    def handler(ctx):
+        sd = ctx.sd
+        if ctx.banner is None:
+            ctx.banner = BannerDetector()
+        if "cam" not in sd:
+            sd.update(cam=ctx.rig.view("forward"), aligned=0)
+        vz = ctx.altitude.compute()
+        fix = ctx.banner.detect(sd["cam"].capture_array())
+
+        if fix is None:                                   # not visible: slow clockwise spin
+            sd["aligned"] = 0
+            ctx.vehicle.send_velocity_yawrate(0.0, 0.0, vz, BANNER_SEARCH_YAW_DPS)
+            return None
+
+        if abs(fix.offset_px) < BANNER_ALIGN_TOL:
+            sd["aligned"] += 1
+            ctx.vehicle.send_velocity_yawrate(0.0, 0.0, vz, 0.0)
+            if sd["aligned"] >= BANNER_ALIGN_FRAMES:
+                ctx.log(f"   banner aligned (offset {fix.offset_px:+.0f} px)")
+                return NEXT[state]
+        else:
+            sd["aligned"] = 0
+            ctx.vehicle.send_velocity_yawrate(0.0, 0.0, vz, yaw_rate_for_offset(fix.offset_px))
+        return None
     return handler
 
 
@@ -222,7 +254,7 @@ def default_handlers() -> Dict[State, callable]:
         S.TAKEOFF: h_takeoff,
         S.MOVE_TO_QR_POINT: h_move_to_qr_point,
         S.SCAN_START_QR: h_scan_start_qr,
-        S.FIND_BANNER_FWD: stub(S.FIND_BANNER_FWD),                        # STUB: banner phase
+        S.FIND_BANNER_FWD: banner_state(S.FIND_BANNER_FWD),
         S.DESCEND_TO_CORRIDOR: altitude_state(S.DESCEND_TO_CORRIDOR, ALT_CORRIDOR),
         S.CORRIDOR_FORWARD: stub(S.CORRIDOR_FORWARD),                      # STUB: corridor phase
         S.CLIMB_TO_DELIVERY: altitude_state(S.CLIMB_TO_DELIVERY, ALT_DELIVERY),
@@ -231,7 +263,7 @@ def default_handlers() -> Dict[State, callable]:
         S.DESCEND_TO_DROP: altitude_state(S.DESCEND_TO_DROP, ALT_PAYLOAD_DROP, stay_over_target=True),
         S.DEPLOY_PAYLOAD: h_deploy_payload,
         S.CLIMB_AFTER_DROP: altitude_state(S.CLIMB_AFTER_DROP, ALT_DELIVERY),
-        S.FIND_BANNER_RTN: stub(S.FIND_BANNER_RTN),                        # STUB: banner phase
+        S.FIND_BANNER_RTN: banner_state(S.FIND_BANNER_RTN),
         S.DESCEND_TO_CORRIDOR_RTN: altitude_state(S.DESCEND_TO_CORRIDOR_RTN, ALT_CORRIDOR),
         S.CORRIDOR_RETURN: stub(S.CORRIDOR_RETURN),                        # STUB: corridor phase
         S.RETURN_TO_HOME: h_return_to_home,

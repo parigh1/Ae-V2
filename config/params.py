@@ -204,3 +204,20 @@ START_QR_MOVE_SPEED = 0.5           # m/s for the ~1 m hop before scanning the s
 CENTER_RETRY_MAX = 2                # times we go back to searching after losing the target
 HOME_RADIUS_M = 2.0                 # "back over the start point" when closer than this
 PAYLOAD_RELEASE_WAIT_S = 1.5        # time allowed for the gripper to open fully
+
+# ── Phase 4 additions (banner + red-zone vision) ──────────────────────────────
+# Banner: reject blobs that are not a solid upright rectangle (grass is ragged).
+BANNER_PROC_WIDTH = 640         # analyse a 640-px-wide copy of the frame (speed on the Pi)
+BANNER_MORPH_CLOSE = 25         # px @1280 wide: fills the gaps left by the banner's text
+BANNER_MORPH_OPEN = 5           # px @1280 wide: removes speckles
+BANNER_MIN_SOLIDITY = 0.70      # blob area / convex-hull area
+BANNER_MIN_FILL = 0.45          # blob area / bounding-box area
+BANNER_YAW_MAX_DPS = 30.0       # never turn faster than this
+BANNER_SEARCH_YAW_DPS = 15.0    # slow spin (clockwise) while the banner is not visible
+
+# Red zone: a solid red rectangle on the ground; red QR codes / speckle must not count.
+RED_MORPH_OPEN = 5              # px @1280 wide
+RED_MIN_SOLIDITY = 0.80
+RED_MIN_FILL = 0.80             # red pixels / area of the tightest (rotated) rectangle around the blob
+RED_INFLUENCE_M = 6.0           # start steering away from a red zone closer than this
+RED_STOP_M = 2.5                # never move toward a red zone closer than this

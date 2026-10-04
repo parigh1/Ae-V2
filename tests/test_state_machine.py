@@ -11,14 +11,15 @@ from navigation.altitude import AltitudeController
 from navigation.visual_servo import VisualServo
 from payload.release import PayloadReleaser
 from safety.watchdog import Watchdog
-from tests.sim_helpers import SimClock, FlightSim
+from hardware.camera import build_camera_rig
+from tests.sim_helpers import SimClock, FlightSim, BannerWorldCamera
 from tests.test_qr_pipeline import make_frame, FakeCamera
 from vision.qr_system import QRSystem
 
 TARGET_WORLD = (2.0, 1.0)      # where the 'right' QR lies, metres N / E of the start
 
 
-def build(frame=None, battery=100.0, see_target=True):
+def build(frame=None, battery=100.0, see_target=True, banner_bearing=0.0):
     clock = SimClock()
     veh = FlightSim(clock)
     veh._battery = battery
@@ -30,8 +31,10 @@ def build(frame=None, battery=100.0, see_target=True):
             f, r = veh.target_in_body(*TARGET_WORLD)
             return SimpleNamespace(forward_m=f, right_m=r)
         qr.find_target = fake_find
+    rig = build_camera_rig(mode="single_fixed",
+                           cameras={"main": BannerWorldCamera(veh, banner_bearing)})
     ctx = MissionContext(
-        veh, qr=qr,
+        veh, rig=rig, qr=qr,
         altitude=AltitudeController(veh, clock=clock.now),
         servo=VisualServo(veh, clock=clock.now, sleep=veh.advance),
         safety=Watchdog(veh), payload=PayloadReleaser(veh),
@@ -174,3 +177,11 @@ def test_losing_the_target_goes_back_to_searching_then_gives_up():
                 break
         assert out == expected_state
         assert ctx.data["center_retries"] == expected_retry
+
+
+def test_timeout_that_falls_back_to_emergency_counts_as_failure():
+    ctx, veh = build()
+    handlers = default_handlers()
+    handlers[State.CORRIDOR_FORWARD] = lambda c: _hold_altitude(c)   # corridor never finishes
+    res = fly(ctx, handlers)
+    assert not res.success and "timeout in CORRIDOR_FORWARD" in res.reason
