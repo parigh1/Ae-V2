@@ -4,7 +4,7 @@ import pytest
 
 from config import params
 from mission.context import MissionContext
-from mission.handlers import default_handlers, h_center_over_qr, _hold_altitude
+from mission.handlers import default_handlers, h_center_over_qr, _hold_altitude, stub
 from mission.state_machine import StateMachine
 from mission.states import State, NEXT, ORDER, TIMEOUT_FALLBACK, allowed_next
 from navigation.altitude import AltitudeController
@@ -41,10 +41,16 @@ def build(frame=None, battery=100.0, see_target=True, banner_bearing=0.0):
         clock=clock.now, sleep=veh.advance)
     return ctx, veh
 
+def sim_handlers():
+      """Real handlers, except the corridor (it has its own camera world and tests)."""
+      h = default_handlers()
+      h[State.CORRIDOR_FORWARD] = stub(State.CORRIDOR_FORWARD)
+      h[State.CORRIDOR_RETURN] = stub(State.CORRIDOR_RETURN)
+      return h
+
 
 def fly(ctx, handlers=None):
-    return StateMachine(ctx, handlers or default_handlers()).run()
-
+    return StateMachine(ctx, handlers or sim_handlers()).run()
 
 def states_visited(result):
     return [name for name, _ in result.history]
@@ -92,7 +98,7 @@ def test_no_start_qr_still_finishes_but_skips_the_drop():
 
 def test_state_timeout_uses_its_fallback():
     ctx, veh = build()
-    handlers = default_handlers()
+    handlers = sim_handlers()
     handlers[State.SEARCH_DELIVERY] = lambda c: _hold_altitude(c)      # never finds anything
     res = fly(ctx, handlers)
     names = states_visited(res)
@@ -103,7 +109,7 @@ def test_state_timeout_uses_its_fallback():
 # ── things going wrong ───────────────────────────────────────────────────────
 def test_crash_in_a_handler_becomes_emergency_rtl():
     ctx, veh = build()
-    handlers = default_handlers()
+    handlers = sim_handlers()
     def boom(c): raise RuntimeError("camera exploded")
     handlers[State.CORRIDOR_FORWARD] = boom
     res = fly(ctx, handlers)
@@ -114,7 +120,7 @@ def test_crash_in_a_handler_becomes_emergency_rtl():
 
 def test_illegal_jump_becomes_emergency():
     ctx, veh = build()
-    handlers = default_handlers()
+    handlers = sim_handlers()
     handlers[State.CORRIDOR_FORWARD] = lambda c: State.LAND
     res = fly(ctx, handlers)
     assert not res.success and "illegal transition" in res.reason
@@ -122,7 +128,7 @@ def test_illegal_jump_becomes_emergency():
 
 def test_low_battery_mid_flight_triggers_rtl():
     ctx, veh = build()
-    handlers = default_handlers()
+    handlers = sim_handlers()
     def drain(c):
         veh._battery = 20.0
     handlers[State.CORRIDOR_FORWARD] = drain
@@ -133,7 +139,7 @@ def test_low_battery_mid_flight_triggers_rtl():
 
 def test_pilot_takeover_stops_all_commands():
     ctx, veh = build()
-    handlers = default_handlers()
+    handlers = sim_handlers()
     seen = {}
     def pilot_flips_switch(c):
         veh._mode = "STABILIZE"
@@ -146,7 +152,7 @@ def test_pilot_takeover_stops_all_commands():
 
 def test_running_out_of_mission_time_triggers_rtl():
     ctx, veh = build()
-    handlers = default_handlers()
+    handlers = sim_handlers()
     def time_warp(c):
         c.mission_t0 -= 850                             # pretend 14 minutes passed
     handlers[State.CORRIDOR_FORWARD] = time_warp
@@ -181,7 +187,7 @@ def test_losing_the_target_goes_back_to_searching_then_gives_up():
 
 def test_timeout_that_falls_back_to_emergency_counts_as_failure():
     ctx, veh = build()
-    handlers = default_handlers()
+    handlers = sim_handlers()
     handlers[State.CORRIDOR_FORWARD] = lambda c: _hold_altitude(c)   # corridor never finishes
     res = fly(ctx, handlers)
     assert not res.success and "timeout in CORRIDOR_FORWARD" in res.reason

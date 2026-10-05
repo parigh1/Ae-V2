@@ -19,10 +19,13 @@ from config.params import (
     PREFLIGHT_MIN_BATTERY_PCT, REQUIRED_PARAMS,
     SERVO_CONFIRM_FRAMES, SERVO_LOST_FRAMES_MAX, CENTER_RETRY_MAX, HOME_RADIUS_M,
     BANNER_ALIGN_TOL, BANNER_ALIGN_FRAMES, BANNER_SEARCH_YAW_DPS,
+    CORRIDOR_LENGTH_M, CORRIDOR_EXIT_MARGIN_M, CORRIDOR_END_WINDOW_M, CORRIDOR_END_LOST_S
 )
 from mission.states import State, NEXT
 from navigation.banner_align import yaw_rate_for_offset
+from navigation.corridor import CorridorController, DistanceTracker, default_sensors, nearest_obstacle
 from vision.banner_detector import BannerDetector
+from vision.corridor_detector import CorridorDetector
 from vision.qr_scanner import QRConfirmer
 
 
@@ -139,6 +142,53 @@ def banner_state(state: State):
     return handler
 
 
+# ── corridor: camera finds the walls, we stay in the middle and fly through ──
+def corridor_state(state: State):
+    def handler(ctx):
+        sd, v = ctx.sd, ctx.vehicle
+        if "ctrl" not in sd:
+            if ctx.corridor is None:
+                ctx.corridor = CorridorDetector()
+            if ctx.obstacle_sensors is None:
+                ctx.obstacle_sensors = default_sensors()
+            ctx.altitude.set_target(ALT_CORRIDOR)
+            loc = v.gps_location
+            sd.update(ctrl=CorridorController(), track=DistanceTracker(), cam=ctx.rig.view("forward"),
+                      entry=(loc.lat, loc.lon), t_prev=ctx.clock(), lost_since=None, last_status="")
+            return None
+
+        now = ctx.clock()
+        dt, sd["t_prev"] = now - sd["t_prev"], now
+        cam = sd["cam"]
+        frame = cam.capture_array()
+        rf = v.rangefinder_distance
+        height = rf if rf is not None else v.altitude
+
+        fix = ctx.corridor.detect(frame, height, cam.pitch_deg)
+        obstacle = nearest_obstacle(ctx.obstacle_sensors, frame, height, cam.pitch_deg)
+        cmd = sd["ctrl"].compute(fix, obstacle, now)
+        v.send_velocity_yawrate(cmd.vx, cmd.vy, ctx.altitude.compute(), cmd.yaw_rate_dps)
+
+        track = sd["track"]
+        dist = track.update(cmd.vx, dt, v.distance_to_m(*sd["entry"]))
+        if cmd.status != sd["last_status"]:
+            ctx.log(f"   corridor: {cmd.status} (at {dist:.1f} m)")
+            sd["last_status"] = cmd.status
+        if track.disagreement and not sd.get("warned"):
+            ctx.log("   corridor: GPS and dead-reckoning disagree, using the smaller distance")
+            sd["warned"] = True
+
+        sd["lost_since"] = (sd["lost_since"] or now) if fix is None else None
+        done = dist >= CORRIDOR_LENGTH_M + CORRIDOR_EXIT_MARGIN_M
+        walls_gone_at_end = (sd["lost_since"] is not None and now - sd["lost_since"] >= CORRIDOR_END_LOST_S
+                             and dist >= CORRIDOR_LENGTH_M - CORRIDOR_END_WINDOW_M)
+        if done or walls_gone_at_end:
+            v.hover()
+            ctx.log(f"   corridor finished after {dist:.1f} m")
+            return NEXT[state]
+        return None
+
+    return handler
 # ── STUBS (their own phases) ─────────────────────────────────────────────────
 def stub(state: State):
     def handler(ctx):
@@ -256,7 +306,7 @@ def default_handlers() -> Dict[State, callable]:
         S.SCAN_START_QR: h_scan_start_qr,
         S.FIND_BANNER_FWD: banner_state(S.FIND_BANNER_FWD),
         S.DESCEND_TO_CORRIDOR: altitude_state(S.DESCEND_TO_CORRIDOR, ALT_CORRIDOR),
-        S.CORRIDOR_FORWARD: stub(S.CORRIDOR_FORWARD),                      # STUB: corridor phase
+        S.CORRIDOR_FORWARD: corridor_state(S.CORRIDOR_FORWARD),                      # STUB: corridor phase
         S.CLIMB_TO_DELIVERY: altitude_state(S.CLIMB_TO_DELIVERY, ALT_DELIVERY),
         S.SEARCH_DELIVERY: h_search_delivery,
         S.CENTER_OVER_QR: h_center_over_qr,
@@ -265,7 +315,7 @@ def default_handlers() -> Dict[State, callable]:
         S.CLIMB_AFTER_DROP: altitude_state(S.CLIMB_AFTER_DROP, ALT_DELIVERY),
         S.FIND_BANNER_RTN: banner_state(S.FIND_BANNER_RTN),
         S.DESCEND_TO_CORRIDOR_RTN: altitude_state(S.DESCEND_TO_CORRIDOR_RTN, ALT_CORRIDOR),
-        S.CORRIDOR_RETURN: stub(S.CORRIDOR_RETURN),                        # STUB: corridor phase
+        S.CORRIDOR_RETURN: corridor_state(S.CORRIDOR_RETURN),                        # STUB: corridor phase
         S.RETURN_TO_HOME: h_return_to_home,
         S.LAND: h_land,
         S.EMERGENCY: h_emergency,

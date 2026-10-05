@@ -221,3 +221,41 @@ RED_MIN_SOLIDITY = 0.80
 RED_MIN_FILL = 0.80             # red pixels / area of the tightest (rotated) rectangle around the blob
 RED_INFLUENCE_M = 6.0           # start steering away from a red zone closer than this
 RED_STOP_M = 2.5                # never move toward a red zone closer than this
+
+# ── Phase 5 additions (corridor navigation, camera only) ──────────────────────
+CORRIDOR_LENGTH_M = 10.0            # rulebook Figure 3
+CORRIDOR_EXIT_MARGIN_M = 1.5        # fly this much past the nominal end before leaving
+CORRIDOR_END_WINDOW_M = 2.0         # near the end, "walls vanished" also means "we are out"
+CORRIDOR_END_LOST_S = 1.0           # ...if they stay gone this long
+
+# Wall finding: edges -> Hough lines -> project onto the ground -> keep lines along the corridor
+CORRIDOR_PROC_WIDTH = 640
+CORRIDOR_CANNY_LOW = 50
+CORRIDOR_CANNY_HIGH = 150
+CORRIDOR_HOUGH_THRESH = 40
+CORRIDOR_MIN_LINE_PX = 40           # px at 640 wide
+CORRIDOR_MAX_GAP_PX = 15            # px at 640 wide
+CORRIDOR_MIN_GROUND_LEN_M = 0.5
+CORRIDOR_MAX_LINE_ANGLE_DEG = 35    # a wall line may deviate this far from "straight ahead"
+CORRIDOR_MIN_WALL_M = 0.4
+CORRIDOR_MAX_WALL_M = 3.1
+CORRIDOR_CLUSTER_M = 0.3            # lines this close together count as the same wall
+CORRIDOR_NEAR_PREFERENCE = 0.4      # prefer the NEAREST well-supported line group (wall base)
+CORRIDOR_MIN_SIDE_LENGTH_M = 1.0    # total line length needed to trust one wall
+
+# Steering
+CORRIDOR_YAW_KP = 0.6               # deg/s of turn per degree of heading error
+CORRIDOR_YAW_MAX_DPS = 15.0
+CORRIDOR_I_CLAMP = 0.1              # m/s cap on the sideways integral term
+CORRIDOR_SLOW_LATERAL_M = 0.8       # slow down when this far off the centre line
+CORRIDOR_WALL_MARGIN_M = 0.6        # never steer closer than this to a wall
+
+# Obstacles (camera sees dark objects on the ground; a LiDAR can be added later)
+OBSTACLE_V_MAX = 60                 # HSV "value" below this counts as dark
+OBSTACLE_MIN_AREA = 800             # px² at 1280x720
+OBSTACLE_MAX_RANGE_M = 8.0
+CORRIDOR_OBSTACLE_SLOW_M = 3.5      # start slowing / side-stepping at this distance
+CORRIDOR_OBSTACLE_STOP_M = 1.5      # no forward motion inside this distance
+CORRIDOR_OBSTACLE_CLEAR_M = 0.8     # an obstacle this far off the centre line can be ignored
+CORRIDOR_SIDESTEP_M = 0.8           # how far to shift away from an obstacle
+CORRIDOR_OBSTACLE_PASS_M = 1.5      # keep the shifted line this much longer after first seeing it

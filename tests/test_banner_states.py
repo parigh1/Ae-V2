@@ -4,14 +4,13 @@ from mission.handlers import default_handlers
 from mission.state_machine import StateMachine
 from mission.states import State
 from config import params
-from tests.test_state_machine import build, states_visited
-
+from tests.test_state_machine import build, states_visited, sim_handlers
 
 def flight_until_banner_done(bearing, start_heading=0.0):
     ctx, veh = build(banner_bearing=bearing)
     veh._heading = start_heading
     seen = {}
-    handlers = default_handlers()
+    handlers = sim_handlers()
     real = handlers[State.FIND_BANNER_FWD]
 
     def spy(c):
@@ -36,7 +35,7 @@ def test_drone_turns_to_face_the_banner(bearing):
 
 def test_banner_never_visible_ends_in_emergency_rtl():
     ctx, veh = build(banner_bearing=None)
-    res = StateMachine(ctx, default_handlers()).run()
+    res = StateMachine(ctx, sim_handlers()).run()
     assert not res.success
     names = states_visited(res)
     assert names[names.index("FIND_BANNER_FWD") + 1] == "EMERGENCY"

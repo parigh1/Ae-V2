@@ -66,6 +66,8 @@ class FlightSim(SimVehicle):
             vz = self.last_body_cmd[2]                 # NED: negative = climb
             self._altitude = max(0.0, self._altitude - vz * dt)
         self._heading = (self._heading + self.last_yaw_rate * dt) % 360.0   # + = clockwise
+        self._lat = self.n / 111_320.0                  # fake GPS: 1 deg latitude = 111.32 km
+        self._lon = self.e / 111_320.0
 
 
 class BannerWorldCamera:
