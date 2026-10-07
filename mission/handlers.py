@@ -22,6 +22,8 @@ from config.params import (
     CORRIDOR_LENGTH_M, CORRIDOR_EXIT_MARGIN_M, CORRIDOR_END_WINDOW_M, CORRIDOR_END_LOST_S
 )
 from mission.states import State, NEXT
+from config.params import (HEARTBEAT_LOST_S, PREFLIGHT_MIN_GPS_FIX, PREFLIGHT_MIN_SATS,
+                           EMERGENCY_RTL_TRIES, EMERGENCY_RTL_RETRY_S)
 from navigation.banner_align import yaw_rate_for_offset
 from navigation.corridor import CorridorController, DistanceTracker, default_sensors, nearest_obstacle
 from navigation.search import LocalFrame, SearchPlanner
@@ -44,12 +46,29 @@ def h_init(ctx):
 
 def h_preflight(ctx):
     v = ctx.vehicle
-    if v.battery_level < PREFLIGHT_MIN_BATTERY_PCT:
-        ctx.data["emergency_reason"] = f"preflight: battery {v.battery_level:.0f}% < {PREFLIGHT_MIN_BATTERY_PCT}%"
+    problems = []
+    if not v.battery_known:
+        problems.append("battery level/voltage not reported (check BATT_MONITOR and BATT_CAPACITY)")
+    elif v.battery_level < PREFLIGHT_MIN_BATTERY_PCT:
+        problems.append(f"battery {v.battery_level:.0f}% < {PREFLIGHT_MIN_BATTERY_PCT}%")
+    if v.heartbeat_age_s > HEARTBEAT_LOST_S:
+        problems.append("no heartbeat from the flight controller")
+    if v.gps_fix_type < PREFLIGHT_MIN_GPS_FIX or v.gps_satellites < PREFLIGHT_MIN_SATS:
+        problems.append(f"GPS not ready (fix type {v.gps_fix_type}, {v.gps_satellites} satellites; "
+                        f"need fix >= {PREFLIGHT_MIN_GPS_FIX} and >= {PREFLIGHT_MIN_SATS} satellites)")
+    if not v.ekf_ok:
+        problems.append("EKF not ready (position estimate has not settled)")
+    rec = getattr(ctx, "recorder", None)
+    if rec is not None and not rec.ok:
+        problems.append("flight log is not working (check the logs/ folder and the SD card)")
+    if problems:
+        ctx.data["emergency_reason"] = "preflight: " + "; ".join(problems)
         return State.EMERGENCY
     if not v.verify_params(REQUIRED_PARAMS):
         ctx.data["emergency_reason"] = "preflight: failsafe parameters wrong"
         return State.EMERGENCY
+    if v.rangefinder_distance is None:
+        ctx.log("   PREFLIGHT WARNING: rangefinder gives no reading (the corridor height hold will rely on the barometer)")
     if ctx.payload is not None:
         ctx.payload.hold()
     ctx.log("PREFLIGHT: all checks passed")
@@ -317,15 +336,24 @@ def h_land(ctx):
 
 
 def h_emergency(ctx):
-    v = ctx.vehicle
-    if not ctx.sd.get("started"):
-        ctx.sd["started"] = True
-        if not v.is_armed:                               # never left the ground
-            return State.DONE
-        v.rtl()
-        return None
-    if not v.is_armed:
+    """Hand the drone to the autopilot (RTL; LAND if RTL keeps failing) and keep trying until it works."""
+    v, sd = ctx.vehicle, ctx.sd
+    if not sd.get("started"):
+        sd.update(started=True, tries=0, last_try=None)
+    if not v.is_armed:                                   # never left the ground, or already landed
         return State.DONE
+    if v.mode_name in ("RTL", "LAND"):                   # the autopilot has taken over
+        return None
+    now = ctx.clock()
+    if sd["last_try"] is None or now - sd["last_try"] >= EMERGENCY_RTL_RETRY_S:
+        sd["last_try"] = now
+        sd["tries"] += 1
+        use_rtl = sd["tries"] <= EMERGENCY_RTL_TRIES
+        try:
+            v.rtl() if use_rtl else v.land()
+        except Exception as exc:                         # noqa: BLE001 - never give up while still flying
+            ctx.log(f"   emergency: {'RTL' if use_rtl else 'LAND'} attempt {sd['tries']} failed ({exc!r}), retrying")
+    return None
 
 
 def default_handlers() -> Dict[State, callable]:

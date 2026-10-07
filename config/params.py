@@ -279,3 +279,15 @@ SEARCH_STUCK_MOVE_M = 3.0          # "barely moved" = stayed within this distanc
 # ── Phase 7 additions (flight data recorder) ──────────────────────────────────
 LOG_DIR = "logs"                    # one set of files per flight, next to the code (relative to the project folder)
 LOG_FSYNC_EVERY_S = 2.0             # force the data onto the SD card this often (a power cut loses at most this much)
+
+# ── Phase 7b additions (safety layer) ─────────────────────────────────────────
+PREFLIGHT_MIN_GPS_FIX = 3           # 3 = 3D fix
+PREFLIGHT_MIN_SATS = 8              # GPS satellites needed before take-off
+HEARTBEAT_LOST_S = 3.0              # no heartbeat from the Pixhawk for this long -> emergency
+BATTERY_UNKNOWN_S = 3.0             # battery data missing for this long while flying -> emergency
+GPS_LOST_S = 3.0                    # GPS fix below PREFLIGHT_MIN_GPS_FIX for this long while flying -> emergency
+PY_FENCE_RADIUS_M = 100.0           # software geofence: max distance from the take-off point (PLACEHOLDER until the Phase 2 geofence)
+PY_FENCE_MAX_ALT_M = 20.0           # software geofence: max height (PLACEHOLDER)
+PY_FENCE_DEBOUNCE_S = 2.0           # a breach must last this long (one GPS glitch must not abort the flight)
+EMERGENCY_RTL_RETRY_S = 1.0         # seconds between attempts to switch the autopilot to RTL
+EMERGENCY_RTL_TRIES = 2             # after this many failed RTL attempts, try LAND instead

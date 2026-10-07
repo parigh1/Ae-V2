@@ -281,6 +281,35 @@ class Vehicle:
     def groundspeed(self) -> float:
         return self._dk.groundspeed or 0.0
 
+    # ── Health readings (used by the safety layer) ────────────────────────────
+    @property
+    def gps_fix_type(self) -> int:
+        """0-1 = no fix, 2 = 2D, 3 = 3D fix, 4+ = DGPS/RTK."""
+        fix = getattr(self._dk.gps_0, "fix_type", None)
+        return fix if fix is not None else 0
+
+    @property
+    def gps_satellites(self) -> int:
+        sats = getattr(self._dk.gps_0, "satellites_visible", None)
+        return sats if sats is not None else 0
+
+    @property
+    def heartbeat_age_s(self) -> float:
+        """Seconds since the Pixhawk last sent a heartbeat (inf if never)."""
+        age = self._dk.last_heartbeat
+        return age if age is not None else float("inf")
+
+    @property
+    def ekf_ok(self) -> bool:
+        return bool(self._dk.ekf_ok)
+
+    @property
+    def battery_known(self) -> bool:
+        """False if the flight controller reports no battery level/voltage
+        (battery_level / battery_voltage then fall back to 'full' defaults)."""
+        b = self._dk.battery
+        return bool(b is not None and b.level is not None and b.voltage is not None)
+
     # ── MAVLink parameter read/write ──────────────────────────────────────────
     def get_param(self, name: str):
         return self._dk.parameters[name]
@@ -338,6 +367,13 @@ class MockVehicle:
         self.last_body_cmd = (0.0, 0.0, 0.0)   # vx, vy, vz of last body cmd
         self.last_yaw_rate = 0.0
         self._start_time = time.time()
+        # Phase 7b: health readings the safety layer looks at (healthy by default)
+        self._gps_fix = 3
+        self._gps_sats = 12
+        self._heartbeat_age = 0.0
+        self._ekf_ok = True
+        self._battery_known = True
+
 
     def _log(self, cmd: str):
         t = time.time() - self._start_time
@@ -466,6 +502,27 @@ class MockVehicle:
     @property
     def groundspeed(self) -> float:
         return 0.0
+
+    # Phase 7b: health readings (same names as the real Vehicle)
+    @property
+    def gps_fix_type(self) -> int:
+        return self._gps_fix
+
+    @property
+    def gps_satellites(self) -> int:
+        return self._gps_sats
+
+    @property
+    def heartbeat_age_s(self) -> float:
+        return self._heartbeat_age
+
+    @property
+    def ekf_ok(self) -> bool:
+        return self._ekf_ok
+
+    @property
+    def battery_known(self) -> bool:
+        return self._battery_known
 
     # Params
     def get_param(self, name: str):
