@@ -275,3 +275,7 @@ SEARCH_SLIDE_HOLD_S = 2.0
 
 SEARCH_STUCK_S = 20.0              # barely moved for this long (with a red zone in view) -> give up on the waypoint
 SEARCH_STUCK_MOVE_M = 3.0          # "barely moved" = stayed within this distance of where the timer started
+
+# ── Phase 7 additions (flight data recorder) ──────────────────────────────────
+LOG_DIR = "logs"                    # one set of files per flight, next to the code (relative to the project folder)
+LOG_FSYNC_EVERY_S = 2.0             # force the data onto the SD card this often (a power cut loses at most this much)

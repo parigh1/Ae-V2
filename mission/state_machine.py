@@ -74,6 +74,17 @@ class StateMachine:
 
     # ── main loop ─────────────────────────────────────────────────────────────
     def run(self, start: State = State.INIT) -> MissionResult:
+        """Fly the mission. The flight recorder (if any) is always closed properly, even if something blows up."""
+        rec = getattr(self.ctx, "recorder", None)
+        result = None
+        try:
+            result = self._run(start)
+            return result
+        finally:
+            if rec is not None:
+                rec.close(result)
+
+    def _run(self, start: State = State.INIT) -> MissionResult:
         ctx = self.ctx
         period = 1.0 / CONTROL_HZ
         state = start
@@ -81,6 +92,13 @@ class StateMachine:
 
         while state not in TERMINAL:
             nxt: Optional[State] = None
+
+            rec = getattr(ctx, "recorder", None)
+            if rec is not None:
+                try:
+                    rec.record(ctx)                     # one log row per tick
+                except Exception:                       # noqa: BLE001 - the log must never stop the flight
+                    pass
 
             # 1. watchdog
             ev = ctx.safety.check() if ctx.safety is not None else None

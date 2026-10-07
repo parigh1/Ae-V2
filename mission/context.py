@@ -15,7 +15,8 @@ class MissionContext:
     def __init__(self, vehicle, rig=None, qr=None, altitude=None, servo=None,
                  safety=None, payload=None, banner=None, corridor=None, obstacle_sensors=None,
                  clock: Callable = time.monotonic,
-                 sleep: Callable = time.sleep):
+                 sleep: Callable = time.sleep,
+                 recorder=None):
         self.vehicle = vehicle
         self.rig = rig                    # hardware.camera.CameraRig
         self.qr = qr                      # vision.qr_system.QRSystem
@@ -28,6 +29,7 @@ class MissionContext:
         self.obstacle_sensors = obstacle_sensors  # navigation.corridor.default_sensors()
         self.clock = clock
         self.sleep = sleep
+        self.recorder = recorder          # telemetry.recorder.FlightRecorder (optional)
 
         # facts learned while flying
         self.delivery_id: Optional[str] = None
@@ -57,3 +59,9 @@ class MissionContext:
         line = f"[T+{self.mission_elapsed():6.1f}s] {message}"
         self.events.append(line)
         print(line)
+
+        if self.recorder is not None:
+            try:
+                self.recorder.event(line)
+            except Exception:         # noqa: BLE001 - the log must never stop the flight
+                pass
