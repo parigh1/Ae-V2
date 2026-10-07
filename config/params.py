@@ -272,3 +272,6 @@ SEARCH_YAW_MAX_DPS = 30.0
 SEARCH_SLIDE_SPEED = 0.5
 SEARCH_SLIDE_TRIGGER_M = 4.0
 SEARCH_SLIDE_HOLD_S = 2.0
+
+SEARCH_STUCK_S = 20.0              # barely moved for this long (with a red zone in view) -> give up on the waypoint
+SEARCH_STUCK_MOVE_M = 3.0          # "barely moved" = stayed within this distance of where the timer started

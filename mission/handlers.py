@@ -218,7 +218,8 @@ def h_search_delivery(ctx):
             ctx.log("   search: zone anchored here, starting the lawnmower")
         else:                                 # came back from CENTER_OVER_QR: keep the same zone and progress
             ctx.log("   search: resuming the lawnmower")
-        sd.update(started=True, cam=ctx.rig.view("down"), red=RedZoneDetector(), last_status="")
+        sd.update(started=True, cam=ctx.rig.view("down"), red=RedZoneDetector(), last_status="",
+                  n_skipped=len(ctx.data["search"][1].skipped))
         return None
 
     if ctx.qr.find_target() is not None:
@@ -237,6 +238,9 @@ def h_search_delivery(ctx):
         v.hover()
         ctx.log("   search finished, target not found -> heading home")
         return State.FIND_BANNER_RTN
+    if len(planner.skipped) != sd["n_skipped"]:
+        ctx.log(f"   search: waypoint {planner.skipped[-1] + 1} blocked by a red zone, skipped it")
+        sd["n_skipped"] = len(planner.skipped)
     if cmd.status != sd["last_status"]:
         ctx.log(f"   search: {cmd.status} (waypoint {planner.i + 1}/{len(planner.path)})")
         sd["last_status"] = cmd.status

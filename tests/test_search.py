@@ -161,7 +161,22 @@ def test_red_zone_never_entered_and_search_still_finishes(rect):
     finished = fly(w, pl)
     assert w.min_gap > 0.3, f"drone came within {w.min_gap:.2f} m of / inside the red zone"
     assert finished, f"stuck at waypoint {pl.i}/{len(pl.path)} after {w.t:.0f} s"
+    assert pl.skipped == []                      # a zone in the way of a pass must not make us give up waypoints
 
+def test_waypoint_inside_a_red_zone_is_skipped_and_search_continues():
+    w = World(red_rects=[(30.0, 40.0, -11.0, -8.0)])             # covers the first pass's far end (38, -9.75)
+    pl = SearchPlanner()
+    finished = fly(w, pl)
+    assert w.min_gap > 0.3
+    assert finished, f"stuck at waypoint {pl.i}/{len(pl.path)} after {w.t:.0f} s"
+    assert 1 in pl.skipped                                       # waypoint index 1 is (38, -9.75)
+
+
+def test_no_skipping_when_no_red_zone_is_in_view():
+    pl = SearchPlanner()
+    cmd = pl.step((0.0, 0.0, 0.0), None, 0.0)
+    assert pl.step((0.0, 0.0, 0.0), None, 500.0) is not None     # a long time later, still no red -> no skip
+    assert pl.skipped == [] and pl.i == 0
 
 def test_red_zone_blocking_the_whole_width_is_never_entered():
     """Nothing can finish this one; the only requirement is to stay out (the state clock then sends us home)."""

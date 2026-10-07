@@ -4,7 +4,7 @@ from typing import List, Optional, Tuple
 from config.params import (SEARCH_ZONE_W, SEARCH_ZONE_H, SEARCH_STRIP_W, SEARCH_SPEED, SEARCH_ENTRY_FROM_LEFT_M,
     SEARCH_MARGIN_M, SEARCH_WP_TOL_M, SEARCH_HEADING_TOL_DEG, SEARCH_SPEED_KP, SEARCH_MIN_SPEED,
     SEARCH_YAW_KP, SEARCH_YAW_MAX_DPS, SEARCH_SLIDE_SPEED, SEARCH_SLIDE_TRIGGER_M, SEARCH_SLIDE_HOLD_S,
-    RED_INFLUENCE_M)
+    RED_INFLUENCE_M,  SEARCH_STUCK_S, SEARCH_STUCK_MOVE_M)
 from navigation.red_zone_avoidance import adjust_velocity
 from vision.red_zone import NearestRed
 
@@ -51,6 +51,8 @@ class SearchPlanner:
     def __init__(self, path=None, left_m=SEARCH_ENTRY_FROM_LEFT_M, right_m=SEARCH_ZONE_W - SEARCH_ENTRY_FROM_LEFT_M):
         self.path = path if path is not None else default_path()
         self.i, self.left_m, self.right_m, self._slide = 0, left_m, right_m, None
+        self.skipped = []                     # indexes of waypoints given up on (blocked by a red zone)
+        self._ref_i, self._ref, self._t_ref = -1, (0.0, 0.0), 0.0
     @property
     def done(self): return self.i >= len(self.path)
 
@@ -89,6 +91,11 @@ class SearchPlanner:
             else: break
         if self.done: return None
         wp = self.path[self.i]; dx, dy = wp.x-x, wp.y-y; dist = math.hypot(dx, dy)
+        if self._ref_i != self.i or math.hypot(x - self._ref[0], y - self._ref[1]) >= SEARCH_STUCK_MOVE_M:
+            self._ref_i, self._ref, self._t_ref = self.i, (x, y), now       # moving (or new waypoint): restart the timer
+        elif red is not None and now - self._t_ref > SEARCH_STUCK_S:
+            self.skipped.append(self.i); self.i += 1; self._slide = None   # parked next to a red zone: give up on this waypoint
+            return self.step(pose, red, now)
         speed = 0.0 if dist < 0.3 else _clamp(SEARCH_SPEED_KP*dist, SEARCH_MIN_SPEED, SEARCH_SPEED)
         vx_e, vy_e = (speed*dx/dist, speed*dy/dist) if dist > 1e-6 else (0.0, 0.0)
         yaw_err = wrap180(wp.heading_deg - hd)
