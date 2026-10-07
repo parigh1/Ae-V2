@@ -50,7 +50,7 @@ SEARCH_ZONE_W = 30.0       # metres
 SEARCH_ZONE_H = 40.0       # metres
 SEARCH_STRIP_W = 8.0       # [CHANGED] metres between passes (was 4.0)
 SEARCH_SPEED = 1.2         # m/s — MUST be ≥1.2 to fit in 15-min window
-SEARCH_TIMEOUT = 170.0     # [CHANGED] s — give up and RTL (was 90.0)
+SEARCH_TIMEOUT = 220.0     # [CHANGED] s — give up and RTL (was 90.0)
 
 # ── Camera (Pi Camera v3 Wide) ────────────────────────────────────────────────
 CAM_FOV_H_DEG = 84.0
@@ -186,7 +186,7 @@ STATE_TIMEOUTS = {
     "DESCEND_TO_CORRIDOR": 15,
     "CORRIDOR_FORWARD": 65,
     "CLIMB_TO_DELIVERY": 25,
-    "SEARCH_DELIVERY": 175,
+    "SEARCH_DELIVERY": 225,
     "CENTER_OVER_QR": 25,
     "DESCEND_TO_DROP": 20,
     "DEPLOY_PAYLOAD": 35,
@@ -259,3 +259,16 @@ CORRIDOR_OBSTACLE_STOP_M = 1.5      # no forward motion inside this distance
 CORRIDOR_OBSTACLE_CLEAR_M = 0.8     # an obstacle this far off the centre line can be ignored
 CORRIDOR_SIDESTEP_M = 0.8           # how far to shift away from an obstacle
 CORRIDOR_OBSTACLE_PASS_M = 1.5      # keep the shifted line this much longer after first seeing it
+
+# ── Phase 6 additions (lawnmower search) ──────────────────────────────────────
+SEARCH_ENTRY_FROM_LEFT_M = 15.0   # distance from the zone's LEFT edge when entering (15 = middle of 30 m). SET from the Phase 2 layout/geofence.
+SEARCH_MARGIN_M = 2.0
+SEARCH_WP_TOL_M = 1.5
+SEARCH_HEADING_TOL_DEG = 10.0
+SEARCH_SPEED_KP = 0.8
+SEARCH_MIN_SPEED = 0.3
+SEARCH_YAW_KP = 0.8
+SEARCH_YAW_MAX_DPS = 30.0
+SEARCH_SLIDE_SPEED = 0.5
+SEARCH_SLIDE_TRIGGER_M = 4.0
+SEARCH_SLIDE_HOLD_S = 2.0

@@ -24,9 +24,11 @@ from config.params import (
 from mission.states import State, NEXT
 from navigation.banner_align import yaw_rate_for_offset
 from navigation.corridor import CorridorController, DistanceTracker, default_sensors, nearest_obstacle
+from navigation.search import LocalFrame, SearchPlanner
 from vision.banner_detector import BannerDetector
 from vision.corridor_detector import CorridorDetector
 from vision.qr_scanner import QRConfirmer
+from vision.red_zone import RedZoneDetector
 
 
 def _hold_altitude(ctx):
@@ -202,17 +204,44 @@ def stub(state: State):
 
 # ── delivery zone ────────────────────────────────────────────────────────────
 def h_search_delivery(ctx):
-    """Hover and look until the matching QR shows up.
-    (Lawnmower pattern + red-zone avoidance arrive in the search phase.)"""
-    _hold_altitude(ctx)
+    """Fly the lawnmower pattern over the delivery zone until the matching QR is seen."""
+    sd, v = ctx.sd, ctx.vehicle
     if ctx.delivery_id is None:
         ctx.log("   no delivery ID -> skipping the drop, heading home")
         return State.FIND_BANNER_RTN
+
+    if not sd.get("started"):
+        ctx.altitude.set_target(ALT_DELIVERY)
+        if "search" not in ctx.data:          # first visit: the zone is anchored where we are now
+            loc = v.gps_location
+            ctx.data["search"] = (LocalFrame(loc.lat, loc.lon, v.heading), SearchPlanner())
+            ctx.log("   search: zone anchored here, starting the lawnmower")
+        else:                                 # came back from CENTER_OVER_QR: keep the same zone and progress
+            ctx.log("   search: resuming the lawnmower")
+        sd.update(started=True, cam=ctx.rig.view("down"), red=RedZoneDetector(), last_status="")
+        return None
+
     if ctx.qr.find_target() is not None:
         ctx.log("   target QR spotted")
         return State.CENTER_OVER_QR
-    return None    # state clock -> FIND_BANNER_RTN
 
+    frame, planner = ctx.data["search"]
+    loc = v.gps_location
+    pose = frame.pose(loc.lat, loc.lon, v.heading)
+    cam = sd["cam"]
+    rf = v.rangefinder_distance
+    height = rf if rf is not None else v.altitude
+    red = sd["red"].nearest(cam.capture_array(), height, cam.pitch_deg)
+    cmd = planner.step(pose, red, ctx.clock())
+    if cmd is None:
+        v.hover()
+        ctx.log("   search finished, target not found -> heading home")
+        return State.FIND_BANNER_RTN
+    if cmd.status != sd["last_status"]:
+        ctx.log(f"   search: {cmd.status} (waypoint {planner.i + 1}/{len(planner.path)})")
+        sd["last_status"] = cmd.status
+    v.send_velocity_yawrate(cmd.vx, cmd.vy, ctx.altitude.compute(), cmd.yaw_rate_dps)
+    return None    # state clock (225 s) -> FIND_BANNER_RTN
 
 def h_center_over_qr(ctx):
     sd = ctx.sd
