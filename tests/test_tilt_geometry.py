@@ -66,7 +66,8 @@ class _TiltedCam(FakeCamera):
 def test_qr_system_uses_the_camera_tilt():
     frame = np.full((CAM_IMG_H, CAM_IMG_W, 3), 255, np.uint8)
     q = np.array(qrcode.make("T1", border=2).convert("L").resize((220, 220)))
-    frame[250:470, 530:750] = q[..., None]               # centred on (640, 360)
+    cx, cy = CAM_IMG_W // 2, CAM_IMG_H // 2
+    frame[cy - 110:cy + 110, cx - 110:cx + 110] = q[..., None]  # centred on the middle of the picture
     veh = SimVehicle(SimClock()); veh.altitude = 10.0
     qs = QRSystem(_TiltedCam(frame), veh)
     qs.delivery_id = "T1"

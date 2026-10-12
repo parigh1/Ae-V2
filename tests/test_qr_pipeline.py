@@ -55,9 +55,9 @@ def test_body_frame_signs():
 
 
 def test_scale_matches_readme_numbers():
-    # README: 100 px at 5 m ≈ 0.70 m
+    # README: 100 px at 5 m is about 0.47 m (Camera Module v2: 62.2 deg wide, 1280 px)
     dx_m, _ = PixelToMeters.offset_at_altitude(100, 0, 5.0)
-    assert abs(dx_m - 0.70) < 0.02
+    assert abs(dx_m - 0.47) < 0.02
 
 
 def test_find_target_end_to_end():

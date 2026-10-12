@@ -24,6 +24,7 @@ from config.params import (
 from mission.states import State, NEXT
 from config.params import (HEARTBEAT_LOST_S, PREFLIGHT_MIN_GPS_FIX, PREFLIGHT_MIN_SATS,
                            EMERGENCY_RTL_TRIES, EMERGENCY_RTL_RETRY_S)
+from config.params import CORRIDOR_COAST_M, CORRIDOR_COAST_SPEED
 from navigation.banner_align import yaw_rate_for_offset
 from navigation.corridor import CorridorController, DistanceTracker, default_sensors, nearest_obstacle
 from navigation.search import LocalFrame, SearchPlanner
@@ -188,10 +189,23 @@ def corridor_state(state: State):
         fix = ctx.corridor.detect(frame, height, cam.pitch_deg)
         obstacle = nearest_obstacle(ctx.obstacle_sensors, frame, height, cam.pitch_deg)
         cmd = sd["ctrl"].compute(fix, obstacle, now)
-        v.send_velocity_yawrate(cmd.vx, cmd.vy, ctx.altitude.compute(), cmd.yaw_rate_dps)
+        # Last stretch: the camera only sees a few metres ahead, so the walls "run out" of view before the
+        # corridor does. If nothing is in the way, keep creeping straight ahead on distance alone.
+        coasting = (fix is None and obstacle is None
+                    and sd.get("dist", 0.0) >= CORRIDOR_LENGTH_M - CORRIDOR_COAST_M)
+        if coasting:
+            vx = CORRIDOR_COAST_SPEED
+            v.send_velocity_yawrate(vx, 0.0, ctx.altitude.compute(), 0.0)
+            if not sd.get("coasting"):
+                ctx.log("   corridor: walls out of view near the end, creeping on distance alone")
+                sd["coasting"] = True
+        else:
+            vx = cmd.vx
+            v.send_velocity_yawrate(cmd.vx, cmd.vy, ctx.altitude.compute(), cmd.yaw_rate_dps)
 
         track = sd["track"]
-        dist = track.update(cmd.vx, dt, v.distance_to_m(*sd["entry"]))
+        dist = track.update(vx, dt, v.distance_to_m(*sd["entry"]))
+        sd["dist"] = dist
         if cmd.status != sd["last_status"]:
             ctx.log(f"   corridor: {cmd.status} (at {dist:.1f} m)")
             sd["last_status"] = cmd.status

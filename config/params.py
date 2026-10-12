@@ -53,10 +53,10 @@ SEARCH_SPEED = 1.2         # m/s — MUST be ≥1.2 to fit in 15-min window
 SEARCH_TIMEOUT = 220.0     # [CHANGED] s — give up and RTL (was 90.0)
 
 # ── Camera (Pi Camera v3 Wide) ────────────────────────────────────────────────
-CAM_FOV_H_DEG = 84.0
-CAM_FOV_V_DEG = 64.0
+CAM_FOV_H_DEG = 62.2       # measured with scripts/fov_check.py (Camera Module v2, forced 1640x1232 mode)
+CAM_FOV_V_DEG = 48.7       # 4:3 picture (16:9 would be only 37.5)
 CAM_IMG_W = 1280
-CAM_IMG_H = 720
+CAM_IMG_H = 960            # 4:3: more vertical view, so a tilted camera can see straight down
 CAM_FPS = 10               # scan rate during search
 
 # ── Camera SETUP (change ONE line to switch hardware layout) ─────────────────
@@ -79,7 +79,14 @@ CAM_MOUNT_PITCH = CAM_MOUNTS[CAMERA_MODE]
 
 # Which driver reads each physical camera: "webcam" (laptop, USB) or "picamera2" (Pi).
 # NOTE: a Raspberry Pi 4 has ONE camera (CSI) port. A second camera must be a USB one.
-CAMERA_BACKEND = {"main": "webcam", "down": "webcam", "forward": "webcam"}
+import platform
+_ON_PI = platform.system() == "Linux" and platform.machine() in ("aarch64", "armv7l")
+_CSI = "picamera2" if _ON_PI else "webcam"      # the Pi's own camera port on the Pi, a webcam on a laptop
+CAMERA_BACKEND = {"main": _CSI, "down": _CSI, "forward": "webcam"}   # a 2nd camera (dual mode) must be a USB webcam
+
+# Force the Camera Module v2's full-width (binned) sensor mode. Without this a 1280x720 request makes
+# picamera2 use a narrow centre crop (about 39 deg wide). None = let picamera2 choose.
+CAM_SENSOR_MODE = (1640, 1232)
 CAM_DEVICE_INDEX = {"main": 0, "down": 0, "forward": 1}   # webcam numbers
 
 # If the camera is bolted on rotated (ribbon cable pointing sideways, etc.):
@@ -225,7 +232,7 @@ RED_STOP_M = 2.5                # never move toward a red zone closer than this
 # ── Phase 5 additions (corridor navigation, camera only) ──────────────────────
 CORRIDOR_LENGTH_M = 10.0            # rulebook Figure 3
 CORRIDOR_EXIT_MARGIN_M = 1.5        # fly this much past the nominal end before leaving
-CORRIDOR_END_WINDOW_M = 2.0         # near the end, "walls vanished" also means "we are out"
+CORRIDOR_END_WINDOW_M = 0.0         # "walls vanished" counts as "we are out" only after the nominal corridor length is covered         # near the end, "walls vanished" also means "we are out"
 CORRIDOR_END_LOST_S = 1.0           # ...if they stay gone this long
 
 # Wall finding: edges -> Hough lines -> project onto the ground -> keep lines along the corridor
@@ -291,3 +298,7 @@ PY_FENCE_MAX_ALT_M = 20.0           # software geofence: max height (PLACEHOLDER
 PY_FENCE_DEBOUNCE_S = 2.0           # a breach must last this long (one GPS glitch must not abort the flight)
 EMERGENCY_RTL_RETRY_S = 1.0         # seconds between attempts to switch the autopilot to RTL
 EMERGENCY_RTL_TRIES = 2             # after this many failed RTL attempts, try LAND instead
+
+# ── Corridor exit (the camera sees only a few metres ahead) ───────────────────
+CORRIDOR_COAST_M = 2.0              # in the last this-many metres, creep on distance alone if the walls are out of view
+CORRIDOR_COAST_SPEED = 0.3          # m/s while creeping

@@ -26,7 +26,7 @@ import numpy as np
 
 from config.params import (
     CAMERA_MODE, CAM_MOUNTS, CAMERA_BACKEND, CAM_DEVICE_INDEX,
-    CAM_IMG_W, CAM_IMG_H,
+    CAM_IMG_W, CAM_IMG_H, CAM_SENSOR_MODE,
     CAM_SERVO_CHANNEL, CAM_SERVO_PWM_DOWN, CAM_SERVO_PWM_FORWARD,
     CAM_SERVO_SETTLE_S,
 )
@@ -60,7 +60,7 @@ class WebcamCamera:
 
 
 class PiCamera:
-    """Raspberry Pi Camera (v3 Wide) via picamera2. Only works on the Pi."""
+    """Raspberry Pi Camera (v2 or v3) via picamera2. Only works on the Pi."""
 
     def __init__(self, width: int = CAM_IMG_W, height: int = CAM_IMG_H):
         from picamera2 import Picamera2        # only exists on the Pi
@@ -68,8 +68,12 @@ class PiCamera:
         # picamera2 naming is backwards: "BGR888" gives pixels stored as R,G,B.
         # VERIFY ON THE PI with scripts/camera_check.py (hold a RED object:
         # it must look red, not blue).
-        cfg = self._cam.create_video_configuration(
-            main={"size": (width, height), "format": "BGR888"})
+        kwargs = {"main": {"size": (width, height), "format": "BGR888"}}
+        if CAM_SENSOR_MODE is not None:
+            # Without this, a 1280x720 request makes the Camera Module v2 use a narrow centre
+            # crop (about 39 deg wide). Forcing its full-width mode gives about 62 deg.
+            kwargs["raw"] = {"size": tuple(CAM_SENSOR_MODE)}
+        cfg = self._cam.create_video_configuration(**kwargs)
         self._cam.configure(cfg)
         self._cam.start()
 
