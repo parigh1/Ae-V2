@@ -68,10 +68,11 @@ CAMERA_MODE = "single_fixed"
 # Pitch = angle of the camera's centre line BELOW the horizon.
 #   90 = pointing straight down      0 = pointing straight forward
 # Straight-down is only visible in a tilted camera if
-#   pitch + (CAM_FOV_V_DEG / 2) >= 90   ->  pitch >= 58 for a 64 deg lens.
-# 65 is a PLACEHOLDER for single_fixed: test it on the real airframe (see guide).
+#   pitch + (CAM_FOV_V_DEG / 2) >= 90   ->  pitch >= 66 for the 48.7 deg picture.
+# 72 deg is the design value for the single fixed camera: a 1 m QR directly below stays fully in view at 5 m
+# (needs >= 71.4), while the banner, corridor and search still see far enough ahead. Measure the real mount.
 CAM_MOUNTS = {
-    "single_fixed": {"down": 65.0, "forward": 65.0},
+    "single_fixed": {"down": 72.0, "forward": 72.0},
     "dual":         {"down": 90.0, "forward": 10.0},
     "servo":        {"down": 90.0, "forward": 0.0},
 }
