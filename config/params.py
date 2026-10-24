@@ -331,3 +331,7 @@ QR_PATTERN_CONFIRM_MIN = 0.80   # two looks of the start QR must agree this well
 CORRIDOR_WIDTH         = 3.51   # m — confirmed: two walls 11.5 ft (3.51 m) apart (PDF page 11)
 CORRIDOR_WALL_MARGIN_M = 0.60   # m
 CORRIDOR_SIDESTEP_M    = 0.80   # m
+
+# ── Vehicle connection (override with --connect / --baud on the command line) ─
+VEHICLE_CONNECT_STR = "udp:127.0.0.1:14550"   # SITL default; real hardware: /dev/ttyAMA0
+VEHICLE_BAUD        = 921600                    # ignored for UDP; used for serial
