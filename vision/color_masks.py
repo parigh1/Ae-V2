@@ -32,6 +32,10 @@ def red_mask(rgb) -> np.ndarray:
     high = hsv_range_mask(rgb, RED_H_LOW2, RED_H_HIGH2, RED_S_LOW, RED_S_HIGH, RED_V_LOW, RED_V_HIGH)
     return cv2.bitwise_or(low, high)
 
+def blue_mask(frame):
+    """Blue exit-corridor banner: #0000FF -> HSV hue ~120 in OpenCV (H range 100-130)."""
+    hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
+    return cv2.inRange(hsv, (100, 100, 80), (130, 255, 255))
 
 def odd_kernel(size_px_at_full_width: float, img_w: int, full_w: int) -> np.ndarray:
     """Square structuring element scaled to the image width, always odd and >= 3."""

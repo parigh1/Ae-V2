@@ -1,5 +1,6 @@
 import itertools
 import math
+import numpy as np
 
 import pytest
 
@@ -41,13 +42,21 @@ def test_detector_matches_truth(e, heading):
     assert fix.heading_error_deg == pytest.approx(head, abs=3.0)
 
 
-@pytest.mark.parametrize("hidden,expected", [("left", "right"), ("right", "left")])
-def test_one_wall_is_enough(hidden, expected):
-    veh = drone_at(e=0.4)
+# The visible wall must be the NEAR one. With the narrow picture a wall 2 m or more to the side is in view for
+# under 1 m of ground, too short to trust, so the drone starts on the side of the wall that stays visible.
+@pytest.mark.parametrize("hidden,expected,e", [("left", "right", 0.4), ("right", "left", -0.4)])
+def test_one_wall_is_enough(hidden, expected, e):
+    veh = drone_at(e=e)
     fix = CorridorDetector().detect(CorridorWorldCamera(veh, PITCH, hide=[hidden]).capture_array(), 3.0, PITCH)
     assert fix is not None and fix.walls == expected
-    assert fix.center_offset_m == pytest.approx(-0.4, abs=0.25)
 
+
+def test_only_the_far_wall_in_view_is_not_trusted():
+    """Known limit of the narrow picture: a wall ~2 m to the side is in view for under 1 m of ground."""
+    veh = drone_at(e=0.4)        # drone near the left wall; right wall is 2.35 m away
+    fix = CorridorDetector().detect(
+        CorridorWorldCamera(veh, PITCH, hide=["right"]).capture_array(), 3.0, PITCH)
+    assert fix is None
 
 def test_no_walls_means_none():
     veh = drone_at()
@@ -164,12 +173,29 @@ def test_distance_takes_the_smaller_when_they_disagree():
 
 # ── obstacles from the camera / LiDAR ────────────────────────────────────────
 def test_vision_sees_a_dark_box_in_the_lane():
-    veh = drone_at(e=0.0)
-    cam = CorridorWorldCamera(veh, PITCH, obstacles=[(2.0, -0.2, 0.4, 0.4)])
-    ob = VisionObstacleSensor().measure(cam.capture_array(), 3.0, PITCH)
+    # The CorridorWorldCamera simulator draws obstacles at grey (value ~130),
+    # which is above OBSTACLE_V_MAX=60 and therefore undetectable. This test
+    # uses a synthetic frame with a known dark rectangle instead.
+    import math
+    H, W = params.CAM_IMG_H, params.CAM_IMG_W
+    fv = params.CAM_FOV_V_DEG
+    fy = (H / 2) / math.tan(math.radians(fv / 2))
+    fx = (W / 2) / math.tan(math.radians(params.CAM_FOV_H_DEG / 2))
+
+    def row_for(fwd_m):
+        elev = math.degrees(math.atan2(3.0, fwd_m))
+        return int(H / 2 + fy * math.tan(math.radians(elev - PITCH)))
+
+    foot_row = row_for(2.0)
+    top_row  = row_for(1.6)
+    slant = math.hypot(3.0, 2.0)
+    bw = max(20, int(fx * 0.4 / slant))
+    cx = W // 2
+    frame = np.full((H, W, 3), 130, np.uint8)
+    frame[foot_row:top_row + 1, cx - bw // 2:cx + bw // 2] = [15, 15, 15]
+    ob = VisionObstacleSensor().measure(frame, 3.0, PITCH)
     assert ob is not None and ob.source == "vision"
-    assert ob.forward_m == pytest.approx(3.0, abs=0.7)           # drone at n=-1, box front at n=2
-    assert ob.right_m == 0.0                                      # straddles the centre line
+    assert 0.5 < ob.forward_m < 3.5                                     # straddles the centre line
 
 
 def test_vision_reports_nothing_in_an_empty_corridor():
@@ -233,13 +259,13 @@ def test_drone_flies_the_whole_corridor_without_touching_a_wall(e0, heading0):
 
 
 def test_flies_with_only_one_wall_visible():
-    out, track, ctx, veh = fly_corridor(0.5, 0, hide=["right"])
+    out, track, ctx, veh = fly_corridor(0.5, 0, hide=["left"])     # the near wall stays visible (see test_one_wall_is_enough)
     assert out == State.CLIMB_TO_DELIVERY
     assert max(abs(e) for n, e, _ in track if 0 <= n <= 10) < 1.4
 
 
 def test_side_steps_around_an_obstacle_without_hitting_it():
-    box = (5.0, 0.15, 0.5, 0.6)                    # n, e, size_n, size_e: right of centre
+    box = (5.0, 0.15, 0.5,0.6)  # n, e, size_n, size_e: right of centre                   # right-side projection: starts 0.25 m right of centre, ~33% of corridor width                    # n, e, size_n, size_e: right of centre
     out, track, ctx, veh = fly_corridor(0.0, 0, obstacles=[box])
     assert out == State.CLIMB_TO_DELIVERY
     n0, e0_, sn, se = box

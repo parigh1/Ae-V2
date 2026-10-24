@@ -241,19 +241,45 @@ Software phases (not the competition's Phase 1 / Phase 2):
 ## 13. Not yet verified on real hardware
 
 - **Everything involving the Pixhawk.** The real `Vehicle` class has never run against an autopilot (real or simulated), including the Phase 7 health readings.
-- **Camera angle.** The design value is 72° below the horizon. The banner is only visible to about 4.6 m ahead from 5 m height, so the real start-to-banner distance must be checked. The lens-to-gripper offset has not been measured.
+- **Camera angle.** The design value is 72° below the horizon. The banner is only visible to about 4.6 m ahead from 5 m height, so the real start-to-banner distance must be checked. The right angle depends on the corridor flying height; see section 14.
 - **Field of view.** 62.2 x 48.7 degrees is an estimate from the sensor crop; confirm it with the ruler test.
 - **QR decoding range.** The QR print size is not in the rulebook (1 m x 1 m is assumed). From 10 m a 1 m code is about 100 px wide with this lens; measure on the real camera. The v2 has a fixed lens, so check focus at long range.
 - **Speed on the Pi:** a frame with no QR code took about 175 ms on a laptop; the Pi is slower. Profiling is part of Phase 8.
 - **Corridor perception on real walls.** Only tested on a synthetic renderer. The rulebook figure may show two lanes; the code assumes one 3.5 m channel with visible wall bases.
 - **HSV thresholds outdoors.** Grass is the main false-positive risk.
-- **Payload method.** The design report says the gripper opens at 5 m; the rulebook figure says the payload is lowered to the ground on a pulley. We follow the report. This may need a Change Request.
 - **Geofence:** the real coordinates arrive in Phase 2 of the competition; the Python limits are placeholders.
 - **Battery reporting:** pre-flight refuses to arm if the Pixhawk does not report battery level and voltage. Typical fix on the ArduPilot side: set `BATT_MONITOR` for the power module and `BATT_CAPACITY` to the battery size (confirm in Mission Planner).
 
 ---
+## 14. Course facts from the organizers (latest briefing) and open questions
 
-## 14. Conventions that must not be broken
+**Confirmed**
+- QR images are 1 m x 1 m and are used only for pattern matching: they carry no coordinates and no decoded strings.
+- Autonomous drops are made from 5 m (the pulley / ground lowering is only for manual missions). Payload is 100 g, supplied with a hook; hook dimensions are still to come.
+- Corridor 3.5 m wide and movable; scattered wall obstacles cover 30-40% of the width and are 2-2.5 ft high; red zones are 5 x 5 ft.
+- Entry banners are green, exit banners red/orange; plain colour, about 5-6 ft wide x 1 ft high, on the ground and on the corridor walls.
+- The geofence will be given as lat/long points covering take-off, corridor and delivery zone.
+- Any design deviation needs a formal design-change request (reviewed at technical inspection); dimensions are checked within +-10 mm; bring printed reports and drawings.
+- Manual interventions during the autonomous mission are penalised; only pilot and co-pilot may communicate during a mission.
+- Updated rulebook details are expected early next week.
+
+**What this means for the software (work not yet done)**
+- QR matching: the current pipeline compares decoded text. It needs an image-based matching fallback (straighten the QR, compare it to the start QR image).
+- Return-lap banner: the exit banner is red/orange, so `FIND_BANNER_RTN` probably needs a red/orange detector, and the red-zone detector must reject thin strips so it does not mistake the exit banner for a no-fly zone.
+- Banner detection must be retuned for a flat 1.8 m x 0.3 m ground strip (minimum area).
+- Camera angle depends on the corridor flying height (see section 3). A flatter pitch needs a "look-ahead" drop: aim the QR a known distance ahead, then move forward that distance blind and release.
+- Geofence: polygon support (software check and loading it into the Pixhawk).
+
+**Open questions sent to the organizers**
+- Do the QR images decode to any text? Can we get the image files in advance?
+- Corridor flying height (below 8 ft or 8-10 ft)? May we fly over the low obstacles? Wall colours and shapes?
+- Which banner marks the entrance for the return lap?
+- Distance from take-off to the entry banner; does it change per team?
+- Geofence format; may we load it into the flight controller?
+- Hook dimensions.
+
+---
+## 15. Conventions that must not be broken
 
 - Velocity commands use `MAV_FRAME_BODY_OFFSET_NED` through `Vehicle.send_body_velocity(vx_forward, vy_right, vz_down)`. **vz is NED: negative means climb.** Yaw rate is in deg/s, positive = clockwise.
 - Camera frames are RGB `uint8`, `H x W x 3`. Image +x is right, +y is down. `forward_m > 0` is ahead, `right_m > 0` is to the right.

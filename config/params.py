@@ -123,6 +123,10 @@ BANNER_S_LOW = 60
 BANNER_S_HIGH = 255
 BANNER_V_LOW = 60
 BANNER_V_HIGH = 255
+# Blue exit banner #0000FF (confirmed PDF)
+EXIT_BANNER_H_LOW  = 100; EXIT_BANNER_H_HIGH = 130
+EXIT_BANNER_S_LOW  = 100; EXIT_BANNER_S_HIGH = 255
+EXIT_BANNER_V_LOW  = 80;  EXIT_BANNER_V_HIGH = 255
 BANNER_MIN_AREA = 4000     # px² — ignore blobs smaller than this
 BANNER_YAW_KP = 0.03       # deg/s per pixel of horizontal offset
 BANNER_ALIGN_TOL = 40      # px — "aligned" when centroid offset < this
@@ -138,7 +142,8 @@ RED_V_LOW, RED_V_HIGH = 80, 255
 RED_MIN_AREA = 3000        # px²
 RED_REPULSION_GAIN = 0.5   # potential field strength
 RED_REPULSION_MAX = 0.3    # m/s max repulsion velocity
-
+# Red zone confirmed 10 ft x 10 ft = 3.05 m x 3.05 m (#FF0000, 1-inch white border)
+RED_ZONE_SIZE_M = 3.05
 # ── Payload winch ─────────────────────────────────────────────────────────────
 WINCH_PWM_CHANNEL = 9      # AUX channel on Pixhawk
 GRIPPER_PWM_CHANNEL = 10
@@ -267,7 +272,9 @@ CORRIDOR_OBSTACLE_STOP_M = 1.5      # no forward motion inside this distance
 CORRIDOR_OBSTACLE_CLEAR_M = 0.8     # an obstacle this far off the centre line can be ignored
 CORRIDOR_SIDESTEP_M = 0.8           # how far to shift away from an obstacle
 CORRIDOR_OBSTACLE_PASS_M = 1.5      # keep the shifted line this much longer after first seeing it
-
+# Corridor obstacles (exit corridor only): 3.5 ft wide x 6 ft tall
+CORRIDOR_OBSTACLE_WIDTH_M  = 1.07   # m = 3.5 ft
+CORRIDOR_OBSTACLE_HEIGHT_M = 1.83   # m = 6 ft
 # ── Phase 6 additions (lawnmower search) ──────────────────────────────────────
 SEARCH_ENTRY_FROM_LEFT_M = 15.0   # distance from the zone's LEFT edge when entering (15 = middle of 30 m). SET from the Phase 2 layout/geofence.
 SEARCH_MARGIN_M = 2.0
@@ -303,3 +310,16 @@ EMERGENCY_RTL_TRIES = 2             # after this many failed RTL attempts, try L
 # ── Corridor exit (the camera sees only a few metres ahead) ───────────────────
 CORRIDOR_COAST_M = 2.0              # in the last this-many metres, creep on distance alone if the walls are out of view
 CORRIDOR_COAST_SPEED = 0.3          # m/s while creeping
+
+# ── QR pattern matching (organizers confirmed codes carry no decodable text) ──
+QR_PATTERN_SIZE        = 64      # rectify each located QR to this square size
+QR_PATTERN_CORNER_MASK = 0.34   # mask the three finder-pattern corners (fraction of width)
+QR_MATCH_MIN           = 0.65   # NCC score needed to accept a match
+QR_MATCH_MARGIN        = 0.15   # winning code must beat second-best by this much
+QR_UNDECODED_MATCH_MIN = 0.75   # stricter threshold when the code could only be located, not decoded
+QR_PATTERN_CONFIRM_MIN = 0.80   # two looks of the start QR must agree this well
+
+# ── Corridor — updated from Phase 2 call (5–6 ft = 1.5–1.8 m, not 3.5 m) ────
+CORRIDOR_WIDTH         = 3.51   # m — confirmed: two walls 11.5 ft (3.51 m) apart (PDF page 11)
+CORRIDOR_WALL_MARGIN_M = 0.60   # m
+CORRIDOR_SIDESTEP_M    = 0.80   # m
