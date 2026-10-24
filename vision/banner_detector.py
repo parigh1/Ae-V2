@@ -27,6 +27,10 @@ class BannerFix:
 
 
 class BannerDetector:
+
+    def _mask(self, frame):
+        return green_mask(frame)
+
     def detect(self, frame) -> Optional[BannerFix]:
         h0, w0 = frame.shape[:2]
         scale = 1.0
@@ -37,7 +41,7 @@ class BannerDetector:
                                interpolation=cv2.INTER_AREA)
         h, w = small.shape[:2]
 
-        mask = green_mask(small)
+        mask = self._mask(small)
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, odd_kernel(BANNER_MORPH_CLOSE, w, CAM_IMG_W))
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, odd_kernel(BANNER_MORPH_OPEN, w, CAM_IMG_W))
 
@@ -108,3 +112,11 @@ class BlueBannerDetector(BannerDetector):
         return BannerFix(cx * inv, cy * inv, best_area * inv * inv,
                          (int(x * inv), int(y * inv), int(bw * inv), int(bh * inv)),
                          cx * inv - w0 / 2.0)
+
+class BlueBannerDetector(BannerDetector):
+    """Detects the BLUE (#0000FF) exit-corridor banner (confirmed from official PDF).
+    Identical geometry rules to the green entry banner; only the colour mask changes."""
+
+    def _mask(self, frame):
+        from vision.color_masks import blue_mask
+        return blue_mask(frame)

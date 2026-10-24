@@ -117,16 +117,24 @@ START_QR_FORWARD_M = 1.0   # [NEW] rulebook 4.2.4: climb to 5 m, move ~1 m forwa
 
 # ── Green banner detection ────────────────────────────────────────────────────
 # HSV ranges — MUST be recalibrated outdoors with real banner
-BANNER_H_LOW = 38
-BANNER_H_HIGH = 85
-BANNER_S_LOW = 60
-BANNER_S_HIGH = 255
-BANNER_V_LOW = 60
-BANNER_V_HIGH = 255
-# Blue exit banner #0000FF (confirmed PDF)
+# Confirmed banner colours (official field properties PDF, page 11)
+# Entry corridor arch and ground: GREEN #00B140 -> HSV H≈71
+BANNER_H_LOW = 38; BANNER_H_HIGH = 85
+BANNER_S_LOW = 60; BANNER_S_HIGH = 255
+BANNER_V_LOW = 60; BANNER_V_HIGH = 255
+
+# Exit corridor arch and ground: BLUE #0000FF -> HSV H≈120
 EXIT_BANNER_H_LOW  = 100; EXIT_BANNER_H_HIGH = 130
 EXIT_BANNER_S_LOW  = 100; EXIT_BANNER_S_HIGH = 255
-EXIT_BANNER_V_LOW  = 80;  EXIT_BANNER_V_HIGH = 255
+EXIT_BANNER_V_LOW  =  80; EXIT_BANNER_V_HIGH = 255
+
+# Confirmed field dimensions (PDF)
+CORRIDOR_WIDTH         = 3.51   # m — 11.5 ft between walls
+CORRIDOR_WALL_MARGIN_M = 0.60
+CORRIDOR_SIDESTEP_M    = 0.80
+RED_ZONE_SIZE_M        = 3.05   # m — 10 ft x 10 ft
+CORRIDOR_OBSTACLE_WIDTH_M  = 1.07   # m — 3.5 ft wide
+CORRIDOR_OBSTACLE_HEIGHT_M = 1.83   # m — 6 ft tall (exit corridor only)
 BANNER_MIN_AREA = 4000     # px² — ignore blobs smaller than this
 BANNER_YAW_KP = 0.03       # deg/s per pixel of horizontal offset
 BANNER_ALIGN_TOL = 40      # px — "aligned" when centroid offset < this

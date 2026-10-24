@@ -42,3 +42,8 @@ def odd_kernel(size_px_at_full_width: float, img_w: int, full_w: int) -> np.ndar
     k = max(3, int(round(size_px_at_full_width * img_w / full_w)))
     k += 1 - k % 2
     return np.ones((k, k), np.uint8)
+
+def blue_mask(frame):
+    """Blue exit-corridor banner: #0000FF -> HSV hue ~120 in OpenCV (H range 100-130)."""
+    hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
+    return cv2.inRange(hsv, (100, 100, 80), (130, 255, 255))

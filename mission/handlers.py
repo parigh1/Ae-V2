@@ -29,6 +29,7 @@ from navigation.banner_align import yaw_rate_for_offset
 from navigation.corridor import CorridorController, DistanceTracker, default_sensors, nearest_obstacle
 from navigation.search import LocalFrame, SearchPlanner
 from vision.banner_detector import BannerDetector
+from vision.banner_detector import BannerDetector, BlueBannerDetector
 from vision.corridor_detector import CorridorDetector
 from vision.qr_scanner import QRConfirmer
 from vision.red_zone import RedZoneDetector
@@ -140,7 +141,11 @@ def banner_state(state: State):
     def handler(ctx):
         sd = ctx.sd
         if ctx.banner is None:
-            ctx.banner = BannerDetector()
+            # FIND_BANNER_RTN looks for the blue (#0000FF) exit-corridor banner;
+            # all other banner states look for the green (#00B140) entry banner.
+            ctx.banner = (BlueBannerDetector()
+                          if state == State.FIND_BANNER_RTN
+                          else BannerDetector())
         if "cam" not in sd:
             sd.update(cam=ctx.rig.view("forward"), aligned=0)
         vz = ctx.altitude.compute()
