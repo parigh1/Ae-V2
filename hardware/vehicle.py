@@ -55,291 +55,189 @@ def haversine_m(lat1, lon1, lat2, lon2) -> float:
 
 class Vehicle:
     """
-    Wraps a DroneKit vehicle connection.
-    All velocity commands, mode changes, and sensor reads go through here.
+    Thin wrapper around a DroneKit vehicle object.
+    Translates our clean property names to DroneKit's actual API.
+    All properties are read-only except through the explicit command methods.
     """
 
-    def __init__(self, connection_string: str, baud: int = 115200,
-                 wait_ready: bool = True):
-        print(f"[Vehicle] Connecting to: {connection_string}")
-        self._dk = connect(
-            connection_string,
-            baud=baud,
-            wait_ready=wait_ready,
-            heartbeat_timeout=60,
-            rate=4,
-        )
+    def __init__(self, dk_vehicle):
+        self._dk = dk_vehicle
 
-    # ── Arming / modes ────────────────────────────────────────────────────────
-    def set_mode(self, mode: str):
-        self._dk.mode = VehicleMode(mode)
-        deadline = time.time() + 10
-        while self._dk.mode.name != mode:
-            if time.time() > deadline:
-                raise RuntimeError(f"[Vehicle] Mode change to {mode} timed out")
-            time.sleep(0.1)
-        print(f"[Vehicle] Mode: {mode}")
-
-    def arm(self, timeout: float = 15.0):
-        """Arms the vehicle. Requires GUIDED mode first."""
-        self.set_mode("GUIDED")
-        self._dk.armed = True
-        deadline = time.time() + timeout
-        while not self._dk.armed:
-            if time.time() > deadline:
-                raise RuntimeError("[Vehicle] Arming timed out")
-            print("[Vehicle] Waiting for arm...")
-            time.sleep(0.5)
-        print("[Vehicle] Armed ✓")
-
-    def disarm(self):
-        self._dk.armed = False
-        time.sleep(1)
-        print("[Vehicle] Disarmed")
-
-    # ── Takeoff / land ────────────────────────────────────────────────────────
-    def takeoff(self, target_alt: float, timeout: float = 30.0):
-        """Simple takeoff to target_alt (metres AGL). Blocks until ~92% reached."""
-        print(f"[Vehicle] Taking off to {target_alt}m")
-        self._dk.simple_takeoff(target_alt)
-        deadline = time.time() + timeout
-        while True:
-            alt = self.altitude
-            print(f"[Vehicle] Altitude: {alt:.2f}m / {target_alt}m")
-            if alt >= target_alt * 0.92:
-                print(f"[Vehicle] Takeoff complete at {alt:.2f}m")
-                return
-            if time.time() > deadline:
-                raise RuntimeError(f"[Vehicle] Takeoff timed out at {alt:.2f}m")
-            time.sleep(0.5)
-
-    def start_takeoff(self, target_alt: float):
-        """Non-blocking takeoff command (the state machine watches the altitude)."""
-        self._dk.simple_takeoff(target_alt)
-        print(f"[Vehicle] Takeoff command sent: {target_alt} m")
-
-    def goto(self, lat: float, lon: float, alt_rel: float):
-        """Fly to a GPS point (altitude relative to home). Non-blocking."""
-        self._dk.simple_goto(LocationGlobalRelative(lat, lon, alt_rel))
-
-    def distance_to_m(self, lat: float, lon: float) -> float:
-        loc = self.gps_location
-        return haversine_m(loc.lat, loc.lon, lat, lon)
-
-    def land(self):
-        self.set_mode("LAND")
-        print("[Vehicle] Landing initiated")
-
-    def rtl(self):
-        self.set_mode("RTL")
-        print("[Vehicle] RTL initiated")
-
-    # ── Velocity control ──────────────────────────────────────────────────────
-    def _send_vel(self, frame, mask, vx, vy, vz, yaw_rate_rad=0.0):
-        msg = self._dk.message_factory.set_position_target_local_ned_encode(
-            0,          # time_boot_ms (unused)
-            0, 0,       # target system, component
-            frame,
-            mask,
-            0, 0, 0,    # position (ignored)
-            vx, vy, vz,
-            0, 0, 0,    # acceleration (ignored)
-            0, yaw_rate_rad,
-        )
-        self._dk.send_mavlink(msg)
-
-    def send_ned_velocity(self, vx: float, vy: float, vz: float,
-                          duration: float = 0.0):
-        """
-        Velocity in the LOCAL NED frame (NOT relative to heading):
-          vx +North, vy +East, vz +DOWN (negative = climb).
-        Use send_body_velocity() for anything driven by the camera/LiDAR.
-        duration > 0: re-sends every 0.1 s for that long (blocking).
-        """
-        def once():
-            self._send_vel(mavutil.mavlink.MAV_FRAME_LOCAL_NED,
-                           _MASK_VEL_ONLY, vx, vy, vz)
-        if duration <= 0:
-            once()
-            return
-        deadline = time.time() + duration
-        while time.time() < deadline:
-            once()
-            time.sleep(0.1)
-
-    def send_body_velocity(self, vx: float, vy: float, vz: float,
-                           duration: float = 0.0):
-        """
-        Velocity RELATIVE TO THE DRONE'S HEADING (MAV_FRAME_BODY_OFFSET_NED):
-          vx +forward (nose), vy +right, vz +DOWN (negative = climb).
-        This is the frame vision / corridor controllers must use.
-        ArduCopter expires velocity setpoints after ~1 s, so call at ≥ 5 Hz.
-        """
-        def once():
-            self._send_vel(mavutil.mavlink.MAV_FRAME_BODY_OFFSET_NED,
-                           _MASK_VEL_ONLY, vx, vy, vz)
-        if duration <= 0:
-            once()
-            return
-        deadline = time.time() + duration
-        while time.time() < deadline:
-            once()
-            time.sleep(0.1)
-
-    def send_velocity_yawrate(self, vx: float, vy: float, vz: float,
-                              yaw_rate_dps: float):
-        """Body-frame velocity AND yaw rate (deg/s, + = clockwise) in one message."""
-        self._send_vel(mavutil.mavlink.MAV_FRAME_BODY_OFFSET_NED,
-                       _MASK_VEL_YAWRATE, vx, vy, vz,
-                       math.radians(yaw_rate_dps))
-
-    def hover(self):
-        """Stop all motion — zero body-frame velocity."""
-        self.send_body_velocity(0, 0, 0)
-
-    # ── Yaw control ───────────────────────────────────────────────────────────
-    def condition_yaw(self, heading_deg: float, relative: bool = False):
-        """
-        Yaw to heading_deg. relative=True rotates BY heading_deg (negative =
-        counter-clockwise); relative=False goes to an absolute compass heading.
-        """
-        is_relative = 1 if relative else 0
-        direction = 1
-        angle = abs(heading_deg) if relative else heading_deg
-        if relative and heading_deg < 0:
-            direction = -1
-        msg = self._dk.message_factory.command_long_encode(
-            0, 0,
-            mavutil.mavlink.MAV_CMD_CONDITION_YAW,
-            0,
-            angle, 20,      # target angle, yaw rate deg/s
-            direction, is_relative,
-            0, 0, 0,
-        )
-        self._dk.send_mavlink(msg)
-
-    def send_yaw_rate(self, yaw_rate_dps: float):
-        """Yaw-rate-only command (deg/s, + = clockwise)."""
-        self._send_vel(mavutil.mavlink.MAV_FRAME_LOCAL_NED,
-                       _MASK_YAWRATE_ONLY, 0, 0, 0,
-                       math.radians(yaw_rate_dps))
-
-    # ── Servo / PWM output (winch + gripper) ──────────────────────────────────
-    def set_servo(self, channel: int, pwm_us: int):
-        """Set a servo channel to a PWM value (µs). AUX channels start at 9."""
-        msg = self._dk.message_factory.command_long_encode(
-            0, 0,
-            mavutil.mavlink.MAV_CMD_DO_SET_SERVO,
-            0,
-            channel, pwm_us,
-            0, 0, 0, 0, 0,
-        )
-        self._dk.send_mavlink(msg)
-
-    # ── Sensor reads ──────────────────────────────────────────────────────────
-    @property
-    def altitude(self) -> float:
-        """Altitude relative to home from barometer/EKF (metres)."""
-        return self._dk.location.global_relative_frame.alt or 0.0
-
-    @property
-    def rangefinder_distance(self):
-        """TF-Luna downward distance (m), or None if unavailable/invalid."""
-        rf = self._dk.rangefinder
-        dist = getattr(rf, "distance", None) if rf else None
-        if dist is not None and dist > 0:
-            return dist
-        return None
-
-    @property
-    def battery_level(self) -> float:
-        b = self._dk.battery
-        return b.level if b and b.level is not None else 100.0
-
-    @property
-    def battery_voltage(self) -> float:
-        b = self._dk.battery
-        return b.voltage if b and b.voltage is not None else 16.8
-
-    @property
-    def heading(self) -> float:
-        return self._dk.heading or 0.0
-
+    # ── identity / state ─────────────────────────────────────────────────────
     @property
     def is_armed(self) -> bool:
-        return self._dk.armed
+        return bool(self._dk.armed)
 
     @property
     def mode_name(self) -> str:
         return self._dk.mode.name
 
+    # ── position ─────────────────────────────────────────────────────────────
+    @property
+    def altitude(self) -> float:
+        """Barometric altitude above the takeoff point, metres."""
+        return self._dk.location.global_relative_frame.alt or 0.0
+
+    @property
+    def heading(self) -> float:
+        """Heading in degrees (0 = North, clockwise)."""
+        return self._dk.heading or 0.0
+
     @property
     def gps_location(self):
-        return self._dk.location.global_relative_frame
+        """Object with .lat, .lon, .alt (WGS84 altitude)."""
+        return self._dk.location.global_frame
 
-    @property
-    def groundspeed(self) -> float:
-        return self._dk.groundspeed or 0.0
-
-    # ── Health readings (used by the safety layer) ────────────────────────────
+    # ── GPS health ───────────────────────────────────────────────────────────
     @property
     def gps_fix_type(self) -> int:
-        """0-1 = no fix, 2 = 2D, 3 = 3D fix, 4+ = DGPS/RTK."""
-        fix = getattr(self._dk.gps_0, "fix_type", None)
-        return fix if fix is not None else 0
+        """0=no fix, 2=2D, 3=3D, 4=DGPS, 5=RTK. Need ≥ 3 for flight."""
+        gps = self._dk.gps_0
+        return gps.fix_type if gps is not None else 0
 
     @property
     def gps_satellites(self) -> int:
-        sats = getattr(self._dk.gps_0, "satellites_visible", None)
-        return sats if sats is not None else 0
+        gps = self._dk.gps_0
+        return gps.satellites_visible if gps is not None else 0
+
+    # ── battery ──────────────────────────────────────────────────────────────
+    @property
+    def battery_level(self) -> float:
+        """State of charge, 0–100. Returns 0 if not reported."""
+        b = self._dk.battery
+        return b.level if (b is not None and b.level is not None) else 0.0
 
     @property
+    def battery_voltage(self) -> float:
+        """Pack voltage in volts. Returns 0 if not reported."""
+        b = self._dk.battery
+        return b.voltage if (b is not None and b.voltage is not None) else 0.0
+
+    @property
+    def battery_known(self) -> bool:
+        """False if the flight controller has never reported battery data."""
+        b = self._dk.battery
+        return b is not None and b.level is not None and b.voltage is not None
+
+    # ── flight controller health ─────────────────────────────────────────────
+    @property
     def heartbeat_age_s(self) -> float:
-        """Seconds since the Pixhawk last sent a heartbeat (inf if never)."""
-        age = self._dk.last_heartbeat
-        return age if age is not None else float("inf")
+        """Seconds since the last heartbeat from the flight controller."""
+        import time
+        lhb = self._dk.last_heartbeat
+        # DroneKit stores last_heartbeat as time.time() (wall clock), not monotonic
+        return (time.time() - lhb) if lhb is not None else 999.0
 
     @property
     def ekf_ok(self) -> bool:
         return bool(self._dk.ekf_ok)
 
+    # ── rangefinder ──────────────────────────────────────────────────────────
     @property
-    def battery_known(self) -> bool:
-        """False if the flight controller reports no battery level/voltage
-        (battery_level / battery_voltage then fall back to 'full' defaults)."""
-        b = self._dk.battery
-        return bool(b is not None and b.level is not None and b.voltage is not None)
+    def rangefinder_distance(self):
+        """Distance in metres from the downward rangefinder, or None."""
+        try:
+            rf = self._dk.rangefinder
+            return rf.distance if rf is not None else None
+        except Exception:
+            return None
 
-    # ── MAVLink parameter read/write ──────────────────────────────────────────
-    def get_param(self, name: str):
-        return self._dk.parameters[name]
+    # ── commands ─────────────────────────────────────────────────────────────
+    def arm(self):
+        import time
+        self._dk.mode = __import__('dronekit').VehicleMode("GUIDED")
+        time.sleep(0.5)
+        self._dk.armed = True
 
-    def set_param(self, name: str, value):
-        self._dk.parameters[name] = value
-        time.sleep(0.1)
+    def disarm(self):
+        self._dk.armed = False
+
+    def start_takeoff(self, altitude_m: float):
+        self._dk.simple_takeoff(altitude_m)
+
+    def land(self):
+        import dronekit
+        self._dk.mode = dronekit.VehicleMode("LAND")
+
+    def rtl(self):
+        import dronekit
+        self._dk.mode = dronekit.VehicleMode("RTL")
+
+    def goto(self, lat: float, lon: float, alt_m: float):
+        import dronekit
+        target = dronekit.LocationGlobalRelative(lat, lon, alt_m)
+        self._dk.simple_goto(target)
+
+    def hover(self):
+        self.send_body_velocity(0.0, 0.0, 0.0)
+
+    def send_body_velocity(self, vx: float, vy: float, vz_down: float):
+        """
+        Send a velocity command in the body frame.
+        vx = forward m/s, vy = right m/s, vz_down = down m/s (positive = descend).
+        Uses MAV_FRAME_BODY_OFFSET_NED.
+        """
+        from pymavlink import mavutil
+        msg = self._dk.message_factory.set_position_target_local_ned_encode(
+            0, 0, 0,
+            mavutil.mavlink.MAV_FRAME_BODY_OFFSET_NED,
+            0b0000111111000111,   # use velocity only, ignore position and acceleration
+            0, 0, 0,              # position (ignored)
+            vx, vy, vz_down,     # velocity
+            0, 0, 0,              # acceleration (ignored)
+            0, 0)                 # yaw, yaw rate (ignored)
+        self._dk.send_mavlink(msg)
+        self._dk.flush()
+
+    def send_velocity_yawrate(self, vx: float, vy: float, vz_down: float,
+                               yaw_rate_dps: float):
+        """Body-frame velocity with yaw rate. yaw_rate_dps > 0 = clockwise."""
+        import math
+        from pymavlink import mavutil
+        msg = self._dk.message_factory.set_position_target_local_ned_encode(
+            0, 0, 0,
+            mavutil.mavlink.MAV_FRAME_BODY_OFFSET_NED,
+            0b0000011111000111,   # use velocity + yaw rate
+            0, 0, 0,
+            vx, vy, vz_down,
+            0, 0, 0,
+            0, math.radians(yaw_rate_dps))
+        self._dk.send_mavlink(msg)
+        self._dk.flush()
+
+    def set_servo(self, channel: int, pwm: int):
+        msg = self._dk.message_factory.command_long_encode(
+            0, 0,
+            183,          # MAV_CMD_DO_SET_SERVO
+            0,
+            channel, pwm, 0, 0, 0, 0, 0)
+        self._dk.send_mavlink(msg)
+
+    def distance_to_m(self, lat: float, lon: float) -> float:
+        """Horizontal distance in metres from the current GPS position to (lat, lon)."""
+        import math
+        loc = self._dk.location.global_frame
+        if loc is None or loc.lat is None:
+            return 0.0
+        R = 6371000.0
+        dlat = math.radians(lat - loc.lat)
+        dlon = math.radians(lon - loc.lon)
+        a = (math.sin(dlat / 2) ** 2 +
+             math.cos(math.radians(loc.lat)) * math.cos(math.radians(lat)) *
+             math.sin(dlon / 2) ** 2)
+        return R * 2 * math.asin(math.sqrt(a))
 
     def verify_params(self, required: dict) -> bool:
-        """True if all required ArduPilot params match; prints mismatches."""
-        all_ok = True
+        """Check ArduPilot parameters. Returns True if all match."""
+        ok = True
         for name, expected in required.items():
-            try:
-                actual = self.get_param(name)
-                if abs(actual - expected) > 0.01:
-                    print(f"[Safety] ✗ MISMATCH {name}: expected {expected}, got {actual}")
-                    all_ok = False
-                else:
-                    print(f"[Safety] ✓ {name} = {actual}")
-            except Exception as e:
-                print(f"[Safety] ✗ Could not read {name}: {e}")
-                all_ok = False
-        return all_ok
+            actual = self._dk.parameters.get(name)
+            if actual != expected:
+                ok = False
+        return ok
 
-    # ── Cleanup ───────────────────────────────────────────────────────────────
     def close(self):
         self._dk.close()
-        print("[Vehicle] Connection closed")
-
-
 # =============================================================================
 # MockVehicle — identical interface, zero hardware needed.
 # =============================================================================

@@ -18,7 +18,8 @@ import argparse
 import sys
 import time
 import traceback
-
+import collections.abc
+collections.MutableMapping = collections.abc.MutableMapping
 from config.params import (
     VEHICLE_CONNECT_STR, VEHICLE_BAUD,
     CAM_IMG_W, CAM_IMG_H,
@@ -65,7 +66,8 @@ def connect_vehicle(args):
         vehicle = dronekit.connect(args.connect, baud=args.baud, wait_ready=True,
                                    heartbeat_timeout=30)
         print("[main] Connected.")
-        return vehicle
+        from hardware.vehicle import Vehicle
+        return Vehicle(vehicle)
     except Exception as exc:
         print(f"[main] ERROR: could not connect to the Pixhawk: {exc!r}")
         print("       Is the cable plugged in? Is the baud rate correct?")
