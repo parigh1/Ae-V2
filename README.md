@@ -6,7 +6,7 @@ A **Raspberry Pi 4** makes every decision; a **Pixhawk 2.4.8 running ArduPilot**
 > **Status: written and simulator-tested, not yet flown.** The full mission logic, vision, safety layer and flight recorder exist and pass the automated test suite on a Windows laptop and on the Raspberry Pi.
 > The Pi camera has been checked on the bench. **Nothing has been connected to the Pixhawk or flown.** Read "Not yet verified on real hardware" before trusting any number in this repo.
 
----
+--
 
 ## 1. The mission (rulebook 4.2.4)
 
